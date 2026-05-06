@@ -1,0 +1,9 @@
+^dev_notes$
+^\\.git$
+^\\.gitignore$
+^\\.Rproj\\.user$
+^.*\\.Rproj$
+^.*\\.Rcheck$
+^\\.\\.Rcheck$
+^dev_notes/\\.\\.Rcheck$
+^README\\.Rmd$

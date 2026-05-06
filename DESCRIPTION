@@ -1,0 +1,44 @@
+Package: CGMAnalyzerShiny
+Title: Shiny Application for Continuous Glucose Monitoring Analysis
+Version: 0.0.0.9000
+Authors@R: c(
+    person("Shubh", "Saraswat", role = c("aut", "cre"), email = "shubh.saraswat00@gmail.com")
+    )
+Author: Shubh Saraswat [aut, cre]
+Maintainer: Shubh Saraswat <shubh.saraswat00@gmail.com>
+Description: A modular Shiny application for continuous glucose monitoring
+    data upload, quality control, preprocessing, clinically relevant CGM
+    metrics, visual analytics, statistical comparison, and future nonlinear
+    complexity analysis. The application prefers CGManalyzer for standard CGM
+    analysis, uses iglu selectively for gaps or validation, and can use a
+    current GitHub version of CGMissingDataR that exports
+    run_missing_glucose_imputation() for missing glucose imputation workflows.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Depends:
+    R (>= 4.3)
+Imports:
+    bslib,
+    data.table,
+    dplyr,
+    DT,
+    future,
+    ggplot2,
+    plotly,
+    promises,
+    readr,
+    readxl,
+    shiny,
+    shinycssloaders,
+    stats,
+    tools,
+    utils
+Suggests:
+    CGManalyzer,
+    CGMissingDataR,
+    iglu,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+LazyData: true

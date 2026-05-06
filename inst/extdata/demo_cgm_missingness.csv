@@ -1,0 +1,47 @@
+id,time,glucose,group,visit,device
+GAP001,2026-05-01 00:00:00,108,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 01:00:00,112,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 02:00:00,116,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 03:00:00,NA,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 04:00:00,123,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 05:00:00,128,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 06:00:00,132,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 07:00:00,136,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 08:00:00,141,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 09:00:00,145,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 10:00:00,150,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 11:00:00,148,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 12:00:00,143,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 13:00:00,138,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 16:00:00,126,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 17:00:00,122,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 18:00:00,118,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 19:00:00,114,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 20:00:00,110,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 21:00:00,107,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 22:00:00,105,Control,Baseline,Dexcom G7
+GAP001,2026-05-01 23:00:00,109,Control,Baseline,Dexcom G7
+GAP002,2026-05-01 00:00:00,132,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 01:00:00,137,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 02:00:00,142,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 03:00:00,148,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 04:00:00,153,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 05:00:00,157,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 06:00:00,NA,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 07:00:00,166,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 08:00:00,172,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 09:00:00,178,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 10:00:00,184,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 11:00:00,188,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 12:00:00,182,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 13:00:00,176,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 14:00:00,170,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 15:00:00,164,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 16:00:00,158,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 17:00:00,152,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 18:00:00,146,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 19:00:00,140,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 20:00:00,135,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 21:00:00,131,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 22:00:00,128,Treatment,Baseline,FreeStyle Libre 3
+GAP002,2026-05-01 23:00:00,130,Treatment,Baseline,FreeStyle Libre 3
