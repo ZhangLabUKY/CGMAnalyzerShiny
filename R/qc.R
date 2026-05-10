@@ -128,3 +128,18 @@ compute_qc_summary <- function(
   row.names(out) <- NULL
   out
 }
+
+prepare_qc_display <- function(qc_summary, source_data = NULL) {
+  out <- as.data.frame(qc_summary, stringsAsFactors = FALSE)
+  if (!nrow(out)) {
+    return(out)
+  }
+  if ("id" %in% names(out)) {
+    if (subject_id_filter_available(source_data %||% out)) {
+      names(out)[names(out) == "id"] <- "Subject ID"
+    } else {
+      out$id <- NULL
+    }
+  }
+  out
+}

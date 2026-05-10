@@ -31,6 +31,9 @@ standardize_upload_mapping <- function(mapping, upload_mode = "single_file") {
 
 validate_mapping <- function(data, mapping, upload_mode = "single_file") {
   mapping <- standardize_upload_mapping(mapping, upload_mode = upload_mode)
+  if (is.na(clean_mapping_value(mapping$id)) && ".source_id" %in% names(data)) {
+    mapping$id <- ".source_id"
+  }
   column_mapping_names <- c(required_cgm_columns(), optional_cgm_columns())
   column_mapping <- stats::setNames(
     vapply(column_mapping_names, function(name) clean_mapping_value(mapping[[name]]), character(1)),
@@ -276,12 +279,14 @@ standardize_cgm_data <- function(
   timestamp_date_order = "dmy"
 ) {
   data <- as.data.frame(data, stringsAsFactors = FALSE)
+  id_source <- determine_id_source(data, mapping, upload_mode = upload_mode)
   mapping <- validate_mapping(data, mapping, upload_mode = upload_mode)
   timestamp <- parse_cgm_timestamp(data[[mapping$timestamp]], tz = tz, date_order = timestamp_date_order)
   validate_parsed_timestamps(data[[mapping$timestamp]], timestamp)
 
   out <- data.frame(
     id = as.character(data[[mapping$id]]),
+    id_source = id_source,
     timestamp = timestamp,
     glucose = convert_glucose_to_mg_dl(coerce_glucose(data[[mapping$glucose]]), units),
     units = "mg/dL",
@@ -367,7 +372,14 @@ load_extdata_csv <- function(filename, missing_message) {
     data <- utils::read.csv(demo_path, stringsAsFactors = FALSE)
   }
 
-  as.data.frame(data, stringsAsFactors = FALSE)
+  data <- as.data.frame(data, stringsAsFactors = FALSE)
+  if (!".source_file" %in% names(data)) {
+    data[[".source_file"]] <- filename
+  }
+  if (!".source_id" %in% names(data)) {
+    data[[".source_id"]] <- derive_source_id(filename)
+  }
+  data
 }
 
 #' Load bundled missingness demo CGM data

@@ -33,7 +33,7 @@ create_trace_plot <- function(
     ) +
     ggplot2::geom_hline(yintercept = thresholds$tir_lower, linetype = "dashed", color = "#B42318") +
     ggplot2::geom_hline(yintercept = thresholds$tir_upper, linetype = "dashed", color = "#B42318") +
-    ggplot2::labs(x = NULL, y = "Glucose (mg/dL)", color = "Participant") +
+    ggplot2::labs(x = NULL, y = "Glucose (mg/dL)", color = "Subject ID") +
     ggplot2::theme_minimal(base_size = 12) +
     ggplot2::theme(legend.position = "bottom")
 }
@@ -99,11 +99,59 @@ plot_filter_available <- function(data, column, min_values = 2L) {
   length(values) >= min_values
 }
 
+plot_subject_filter_choices <- function(data) {
+  values <- if ("id" %in% names(data)) data$id else character()
+  filter_select_choices(sort(clean_filter_values(values)), all_label = "All")
+}
+
+normalize_plot_days <- function(day) {
+  day <- day %||% character()
+  day <- as.character(day)
+  day <- trimws(day)
+  day <- day[!is.na(day) & nzchar(day)]
+  if (!length(day) || all_filter_value() %in% day) {
+    return(all_filter_value())
+  }
+  sort(unique(day))
+}
+
+normalize_plot_day <- normalize_plot_days
+
+plot_day_cache_key <- function(day) {
+  paste(normalize_plot_days(day), collapse = "|")
+}
+
+preserve_plot_day_selection <- function(selected, choices, previous = all_filter_value()) {
+  selected_raw <- selected %||% character()
+  selected_raw <- as.character(selected_raw)
+  selected_raw <- trimws(selected_raw)
+  selected_raw <- selected_raw[!is.na(selected_raw) & nzchar(selected_raw)]
+  choice_values <- unname(choices)
+
+  if (!length(selected_raw)) {
+    previous <- normalize_plot_days(previous)
+    if (!identical(previous, all_filter_value()) && all(previous %in% choice_values)) {
+      return(previous)
+    }
+    return(all_filter_value())
+  }
+
+  selected <- normalize_plot_days(selected_raw)
+  if (identical(selected, all_filter_value()) || all_filter_value() %in% selected) {
+    return(all_filter_value())
+  }
+  selected <- selected[selected %in% choice_values]
+  if (!length(selected)) {
+    return(all_filter_value())
+  }
+  choice_values[choice_values %in% selected & choice_values != all_filter_value()]
+}
+
 filter_plot_data <- function(data, participant = "", group = "", visit = "", day = "") {
   participant <- normalize_filter_value(participant)
   group <- normalize_filter_value(group)
   visit <- normalize_filter_value(visit)
-  day <- normalize_filter_value(day)
+  day <- normalize_plot_days(day)
 
   if (nzchar(participant)) {
     data <- data[data$id == participant, , drop = FALSE]
@@ -114,8 +162,8 @@ filter_plot_data <- function(data, participant = "", group = "", visit = "", day
   if ("visit" %in% names(data) && nzchar(visit)) {
     data <- data[data$visit == visit, , drop = FALSE]
   }
-  if (nzchar(day)) {
-    data <- data[as.character(as.Date(data$timestamp)) == day, , drop = FALSE]
+  if (!identical(day, all_filter_value())) {
+    data <- data[as.character(as.Date(data$timestamp)) %in% day, , drop = FALSE]
   }
   data
 }
@@ -123,6 +171,10 @@ filter_plot_data <- function(data, participant = "", group = "", visit = "", day
 available_plot_days <- function(data, participant = "", group = "", visit = "") {
   data <- filter_plot_data(data, participant = participant, group = group, visit = visit)
   sort(unique(as.character(as.Date(data$timestamp[!is.na(data$timestamp)]))))
+}
+
+plot_day_filter_choices <- function(data, participant = "", group = "", visit = "") {
+  filter_select_choices(available_plot_days(data, participant = participant, group = group, visit = visit), all_label = "All days")
 }
 
 is_finite_cgm_timestamp <- function(timestamp) {
@@ -138,7 +190,7 @@ empty_plot <- function(message = "No data available") {
 #' Prepare CGM data for time-of-day plots
 #'
 #' @param data Standardized CGM data.
-#' @param participant Participant filter.
+#' @param participant Subject ID filter.
 #' @param group Group filter.
 #' @param visit Visit filter.
 #' @param day Date filter as `YYYY-MM-DD`.
@@ -190,7 +242,7 @@ target_range_label <- function(thresholds) {
 #'
 #' @param data Standardized CGM data.
 #' @param thresholds Named glucose thresholds in mg/dL.
-#' @param participant Participant filter.
+#' @param participant Subject ID filter.
 #' @param group Group filter.
 #' @param visit Visit filter.
 #' @param day Date filter as `YYYY-MM-DD`.
@@ -204,8 +256,10 @@ create_daily_overlay_plot <- function(
   group = "",
   visit = "",
   day = "",
-  max_points_per_participant = Inf
+  max_points_per_participant = Inf,
+  date_legend_limit = 14L
 ) {
+  day <- normalize_plot_days(day)
   plot_data <- prepare_time_of_day_plot_data(
     data,
     participant = participant,
@@ -218,6 +272,7 @@ create_daily_overlay_plot <- function(
     return(empty_plot())
   }
 
+  show_date_legend <- length(unique(plot_data$date)) <= date_legend_limit
   plot <- ggplot2::ggplot(
     plot_data,
     ggplot2::aes(x = time_minutes, y = glucose, color = date, group = plot_group)
@@ -236,7 +291,7 @@ create_daily_overlay_plot <- function(
     time_of_day_scale() +
     ggplot2::labs(x = "Time of day", y = "Glucose (mg/dL)", color = "Date") +
     ggplot2::theme_minimal(base_size = 12) +
-    ggplot2::theme(legend.position = "bottom")
+    ggplot2::theme(legend.position = if (show_date_legend) "bottom" else "none")
 
   if (length(unique(plot_data$id)) > 1L) {
     plot <- plot + ggplot2::facet_wrap(~id)
@@ -278,7 +333,7 @@ prepare_agp_summary_data <- function(
 #'
 #' @param data Standardized CGM data.
 #' @param thresholds Named glucose thresholds in mg/dL.
-#' @param participant Participant filter.
+#' @param participant Subject ID filter.
 #' @param group Group filter.
 #' @param visit Visit filter.
 #' @param bin_minutes Time-of-day bin width in minutes.
@@ -392,7 +447,7 @@ create_tir_plot <- function(metrics) {
       values = c("Below range" = "#2F80ED", "In range" = "#219653", "Above range" = "#EB5757")
     ) +
     ggplot2::coord_cartesian(ylim = c(0, 100)) +
-    ggplot2::labs(x = "Participant", y = "Percent of readings", fill = NULL) +
+    ggplot2::labs(x = "Subject ID", y = "Percent of readings", fill = NULL) +
     ggplot2::theme_minimal(base_size = 12) +
     ggplot2::theme(legend.position = "bottom")
 }

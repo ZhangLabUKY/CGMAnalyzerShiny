@@ -8,12 +8,13 @@ app_ui <- function() {
       value = "data",
       shiny::fluidRow(
         shiny::column(5, upload_module_ui("upload")),
-        shiny::column(7, column_mapping_module_ui("column_mapping"))
+        shiny::column(
+          7,
+          shiny::uiOutput("data_upload_hint"),
+          shiny::uiOutput("data_mapping_ui")
+        )
       ),
-      shiny::hr(),
-      preprocessing_module_ui("preprocessing"),
-      shiny::hr(),
-      upload_preview_ui("upload")
+      shiny::uiOutput("data_workflow_ui")
     ),
     shiny::tabPanel(
       "Quality",

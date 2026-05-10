@@ -132,6 +132,118 @@ test_that("plot filters support All sentinel for participant, group, visit, and 
   expect_equal(filtered$id, "A")
 })
 
+test_that("daily overlay day helpers normalize default All days", {
+  data <- data.frame(
+    id = rep("A", 4),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 08:00:00",
+      "2026-05-06 08:00:00",
+      "2026-05-07 08:00:00",
+      "2026-05-08 08:00:00"
+    )),
+    glucose = c(80, 120, 90, 130),
+    stringsAsFactors = FALSE
+  )
+
+  choices <- plot_day_filter_choices(data)
+  all_days <- filter_plot_data(data, day = normalize_plot_day(NULL))
+  blank_days <- filter_plot_data(data, day = normalize_plot_day(""))
+  sentinel_days <- filter_plot_data(data, day = normalize_plot_day(all_filter_value()))
+  selected_day <- filter_plot_data(data, day = normalize_plot_day("2026-05-06"))
+  selected_days <- filter_plot_data(data, day = normalize_plot_days(c("2026-05-06", "2026-05-08")))
+  all_overrides_days <- filter_plot_data(data, day = normalize_plot_days(c(all_filter_value(), "2026-05-06")))
+
+  expect_equal(normalize_plot_day(NULL), all_filter_value())
+  expect_equal(normalize_plot_day(""), all_filter_value())
+  expect_equal(normalize_plot_day(all_filter_value()), all_filter_value())
+  expect_equal(normalize_plot_day("2026-05-06"), "2026-05-06")
+  expect_equal(normalize_plot_days(c("2026-05-08", "2026-05-06")), c("2026-05-06", "2026-05-08"))
+  expect_equal(normalize_plot_days(c(all_filter_value(), "2026-05-06")), all_filter_value())
+  expect_equal(plot_day_cache_key(c("2026-05-08", "2026-05-06")), plot_day_cache_key(c("2026-05-06", "2026-05-08")))
+  expect_equal(names(choices)[[1L]], "All days")
+  expect_equal(unname(choices)[[1L]], all_filter_value())
+  expect_equal(preserve_plot_day_selection(NULL, choices), all_filter_value())
+  expect_equal(preserve_plot_day_selection(c("2026-05-08", "2026-05-06"), choices), c("2026-05-06", "2026-05-08"))
+  expect_equal(preserve_plot_day_selection(c(all_filter_value(), "2026-05-06"), choices), all_filter_value())
+  expect_equal(
+    preserve_plot_day_selection(character(), choices, previous = c("2026-05-06", "2026-05-08")),
+    c("2026-05-06", "2026-05-08")
+  )
+  expect_equal(nrow(all_days), nrow(data))
+  expect_equal(blank_days, all_days)
+  expect_equal(sentinel_days, all_days)
+  expect_equal(nrow(selected_day), 1)
+  expect_equal(nrow(selected_days), 2)
+  expect_equal(all_overrides_days, all_days)
+})
+
+test_that("plot subject filter choices are stable and user-facing", {
+  data <- data.frame(
+    id = c("B", "A", NA, "", " A "),
+    timestamp = parse_cgm_timestamp(rep("2026-05-05 08:00:00", 5)),
+    glucose = 100,
+    stringsAsFactors = FALSE
+  )
+
+  choices <- plot_subject_filter_choices(data)
+
+  expect_equal(names(choices)[[1L]], "All")
+  expect_equal(unname(choices)[[1L]], all_filter_value())
+  expect_equal(unname(choices), c(all_filter_value(), "A", "B"))
+  expect_equal(preserve_filter_selection("A", choices), "A")
+  expect_equal(preserve_filter_selection("Missing", choices), all_filter_value())
+})
+
+test_that("daily overlay remains available for one filename-derived subject", {
+  data <- data.frame(
+    id = rep("one_subject", 4),
+    id_source = subject_id_source_filename(),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 08:00:00",
+      "2026-05-05 08:05:00",
+      "2026-05-06 08:00:00",
+      "2026-05-06 08:05:00"
+    )),
+    glucose = c(80, 120, 90, 130),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    visit = NA_character_,
+    source_file = "one_subject.csv",
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  expect_false(subject_id_filter_available(data))
+  expect_s3_class(create_daily_overlay_plot(data), "ggplot")
+})
+
+test_that("daily overlay hides very large date legends", {
+  timestamps <- parse_cgm_timestamp(paste0("2026-05-", sprintf("%02d", 1:15), " 08:00:00"))
+  data <- data.frame(
+    id = rep("A", length(timestamps)),
+    timestamp = timestamps,
+    glucose = seq_along(timestamps) + 100,
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    visit = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  many_days <- create_daily_overlay_plot(data, date_legend_limit = 14)
+  few_days <- create_daily_overlay_plot(data[seq_len(2), , drop = FALSE], date_legend_limit = 14)
+  selected_day <- create_daily_overlay_plot(data, day = "2026-05-02", date_legend_limit = 14)
+  selected_days <- create_daily_overlay_plot(data, day = c("2026-05-02", "2026-05-03"), date_legend_limit = 14)
+
+  expect_equal(many_days$theme$legend.position, "none")
+  expect_equal(few_days$theme$legend.position, "bottom")
+  expect_equal(selected_day$theme$legend.position, "bottom")
+  expect_equal(selected_days$theme$legend.position, "bottom")
+})
+
 test_that("group and visit plot filters require usable non-missing values", {
   data <- data.frame(
     id = c("A", "B", "C"),
@@ -253,6 +365,26 @@ test_that("plot download button is in the header action area before filters", {
     regexpr("plots-download_plot", html, fixed = TRUE)[[1L]],
     regexpr("plots-plot_type", html, fixed = TRUE)[[1L]]
   )
+})
+
+test_that("plots module uses render-time Subject ID filter container", {
+  ui <- plots_module_ui("plots")
+  html <- paste(as.character(ui), collapse = "\n")
+
+  expect_true(grepl("plots-subject_filter", html, fixed = TRUE))
+  expect_false(grepl("id=\"plots-participant\"", html, fixed = TRUE))
+  expect_false(grepl(">Participant<", html, fixed = TRUE))
+})
+
+test_that("plots module uses normalized day values for active plot cache", {
+  code <- paste(readLines(testthat::test_path("../../R/module_plots.R"), warn = FALSE), collapse = "\n")
+
+  expect_true(grepl("normalized_day <- shiny::reactive", code, fixed = TRUE))
+  expect_true(grepl("day_selection <- shiny::reactiveVal", code, fixed = TRUE))
+  expect_true(grepl("day = normalized_day()", code, fixed = TRUE))
+  expect_true(grepl("plot_day_cache_key(normalized_day())", code, fixed = TRUE))
+  expect_true(grepl("\"remove_button\"", code, fixed = TRUE))
+  expect_false(grepl("input$day\n    )", code, fixed = TRUE))
 })
 
 test_that("plotly legend cleanup removes ggplotly trace suffixes", {

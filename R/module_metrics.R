@@ -2,13 +2,14 @@ metrics_module_ui <- function(id) {
   ns <- shiny::NS(id)
   shiny::tagList(
     shiny::h3("Core Metrics"),
+    shiny::h4("Metric Overview"),
     shinycssloaders::withSpinner(shiny::uiOutput(ns("summary_cards")), type = 4),
-    shiny::uiOutput(ns("adapter_status")),
+    shiny::h4("Detailed Metrics"),
     shiny::fluidRow(
-      shiny::column(3, shiny::selectInput(ns("participant"), "Participant", choices = character())),
+      shiny::column(3, shiny::uiOutput(ns("participant_filter"))),
       shiny::column(3, shiny::uiOutput(ns("group_filter"))),
       shiny::column(3, shiny::uiOutput(ns("visit_filter"))),
-      shiny::column(3, shiny::selectInput(ns("category"), "Metric category", choices = character()))
+      shiny::column(3, shiny::uiOutput(ns("category_filter")))
     ),
     shiny::uiOutput(ns("metrics_empty_state")),
     shinycssloaders::withSpinner(DT::DTOutput(ns("metrics_table")), type = 4)
@@ -17,20 +18,23 @@ metrics_module_ui <- function(id) {
 
 metrics_module_server <- function(id, standardized, settings, active_tab = NULL) {
   shiny::moduleServer(id, function(input, output, session) {
-    base_metrics <- shiny::bindCache(shiny::reactive({
+    base_metric_state <- shiny::reactive({
       req_active_tab(active_tab, c("metrics", "statistics", "export"))
-      compute_base_core_metrics(
+      data <- tryCatch(
         standardized(),
-        thresholds = settings()$thresholds_mg_dl
+        shiny.silent.error = function(error) NULL,
+        error = function(error) error
       )
-    }),
-    cgm_data_signature(standardized()),
-    threshold_signature(settings()$thresholds_mg_dl)
-    )
+      if (inherits(data, "error")) {
+        return(metric_state("base_error", error = conditionMessage(data)))
+      }
+      compute_base_metric_state(data, thresholds = settings()$thresholds_mg_dl)
+    })
 
     adapter_metrics <- shiny::reactiveVal(NULL)
-    adapter_status <- shiny::reactiveVal("")
-    adapter_key_started <- shiny::reactiveVal(NULL)
+    adapter_state <- new.env(parent = emptyenv())
+    adapter_state$key <- NULL
+    adapter_state$worker_token <- NULL
 
     adapter_key <- shiny::reactive({
       paste(
@@ -44,44 +48,55 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
 
     shiny::observe({
       req_active_tab(active_tab, c("metrics", "statistics", "export"))
-      key <- adapter_key()
-      if (identical(adapter_key_started(), key)) {
+      state <- base_metric_state()
+      if (!should_start_additional_metrics(state)) {
+        adapter_metrics(NULL)
+        adapter_state$key <- NULL
+        adapter_state$worker_token <- NULL
         return(NULL)
       }
-      adapter_key_started(key)
+      key <- adapter_key()
+      if (identical(adapter_state$key, key)) {
+        return(NULL)
+      }
+      adapter_state$key <- key
       adapter_metrics(NULL)
-      adapter_status("Additional metrics are being calculated.")
 
-      data <- standardized()
+      data <- state$data
       by <- default_metric_groups(data)
+      worker_token <- configure_background_workers()
+      adapter_state$worker_token <- worker_token
       promise <- promises::future_promise({
         compute_metric_adapters(data, by = by)
       })
       promises::then(
         promise,
         onFulfilled = function(value) {
-          if (identical(adapter_key_started(), key)) {
+          if (identical(adapter_state$key, key)) {
             adapter_metrics(value)
-            adapter_status("")
           }
+          schedule_background_worker_cleanup(worker_token)
         },
         onRejected = function(error) {
-          if (identical(adapter_key_started(), key)) {
+          if (identical(adapter_state$key, key)) {
             adapter_metrics(NULL)
-            adapter_status("Additional metrics could not be calculated. Core metrics are still available.")
           }
+          schedule_background_worker_cleanup(worker_token)
         }
       )
       NULL
     })
 
     metrics <- shiny::reactive({
-      base <- base_metrics()
+      state <- base_metric_state()
+      if (!should_start_additional_metrics(state)) {
+        return(state$base)
+      }
+      base <- state$base
       adapters <- adapter_metrics()
       if (is.null(adapters) && is_active_tab(active_tab, "export")) {
-        adapters <- compute_metric_adapters(standardized(), by = default_metric_groups(standardized()))
+        adapters <- compute_metric_adapters(state$data, by = default_metric_groups(state$data))
         adapter_metrics(adapters)
-        adapter_status("")
       }
       if (is.null(adapters)) {
         return(base)
@@ -89,30 +104,52 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
       merge_core_metric_outputs(base, adapters, by = default_metric_groups(base))
     })
 
-    display_metrics <- shiny::reactive({
-      prepare_metrics_display(metrics())
+    display_metric_state <- shiny::reactive({
+      state <- base_metric_state()
+      if (!should_start_additional_metrics(state)) {
+        return(state)
+      }
+      tryCatch({
+        raw_metrics <- metrics()
+        display <- prepare_metrics_display(raw_metrics)
+        if (!nrow(display)) {
+          return(metric_state("no_analysis_rows", data = state$data, base = raw_metrics, display = display))
+        }
+        metric_state("base_ready", data = state$data, base = raw_metrics, display = display)
+      }, error = function(error) {
+        metric_state("base_error", data = state$data, base = state$base, display = state$display, error = conditionMessage(error))
+      })
     })
 
-    output$adapter_status <- shiny::renderUI({
-      req_active_tab(active_tab, "metrics")
-      status <- adapter_status()
-      if (!nzchar(status)) {
+    display_metrics <- shiny::reactive({
+      display_metric_state()$display
+    })
+
+    output$participant_filter <- shiny::renderUI({
+      state <- display_metric_state()
+      if (!identical(state$status, "base_ready") || !"Subject ID" %in% names(state$display)) {
         return(NULL)
       }
-      shiny::div(
-        class = "alert alert-info",
-        style = "padding: 8px 12px;",
-        status
+      display <- state$display
+      choices <- metric_participant_filter_choices(display)
+      shiny::selectInput(
+        session$ns("participant"),
+        "Subject ID",
+        choices = choices,
+        selected = preserve_filter_selection(input$participant, choices)
       )
     })
 
-    shiny::observeEvent(display_metrics(), {
+    output$category_filter <- shiny::renderUI({
       display <- display_metrics()
-      update_filter_select(session, "participant", sort(unique(display$Participant)), selected = input$participant)
-      categories <- metric_category_order()
-      categories <- categories[categories %in% unique(display$Category)]
-      update_filter_select(session, "category", categories, selected = input$category)
-    }, ignoreInit = FALSE)
+      choices <- metric_category_filter_choices(display)
+      shiny::selectInput(
+        session$ns("category"),
+        "Metric category",
+        choices = choices,
+        selected = preserve_filter_selection(input$category, choices)
+      )
+    })
 
     output$group_filter <- shiny::renderUI({
       display <- display_metrics()
@@ -161,9 +198,13 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
     })
 
     output$summary_cards <- shiny::renderUI({
+      state <- display_metric_state()
+      if (!identical(state$status, "base_ready")) {
+        return(shiny::div(class = "alert alert-info", state$message))
+      }
       display <- card_display()
       if (!nrow(display)) {
-        return(shiny::div(class = "alert alert-info", "Select mapped glucose and timestamp columns to calculate metrics."))
+        return(shiny::div(class = "alert alert-info", "No metrics match the current filters."))
       }
       key_metrics <- c(
         "Mean glucose",
@@ -189,6 +230,10 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
     })
 
     output$metrics_empty_state <- shiny::renderUI({
+      state <- display_metric_state()
+      if (!identical(state$status, "base_ready")) {
+        return(NULL)
+      }
       if (nrow(filtered_display())) {
         return(NULL)
       }

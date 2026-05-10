@@ -98,7 +98,7 @@ metric_display_catalog <- function() {
 }
 
 metric_identifier_columns <- function(metrics) {
-  c("id", "group", "visit")[c("id", "group", "visit") %in% names(metrics)]
+  c("id", "id_source", "group", "visit")[c("id", "id_source", "group", "visit") %in% names(metrics)]
 }
 
 metric_category_order <- function() {
@@ -111,6 +111,29 @@ metric_category_order <- function() {
     "Risk",
     "Excursions"
   )
+}
+
+empty_metrics_display <- function() {
+  data.frame(
+    `Subject ID` = character(),
+    Category = character(),
+    Metric = character(),
+    Value = numeric(),
+    Units = character(),
+    stringsAsFactors = FALSE
+  )
+}
+
+metric_participant_filter_choices <- function(display) {
+  values <- if ("Subject ID" %in% names(display)) display[["Subject ID"]] else character()
+  filter_select_choices(sort(clean_filter_values(values)))
+}
+
+metric_category_filter_choices <- function(display) {
+  values <- if ("Category" %in% names(display)) clean_filter_values(display$Category) else character()
+  ordered <- metric_category_order()
+  ordered <- ordered[ordered %in% values]
+  filter_select_choices(ordered)
 }
 
 format_metric_value <- function(value, digits) {
@@ -129,26 +152,21 @@ prepare_metrics_display <- function(metrics) {
   id_columns <- metric_identifier_columns(metrics)
 
   if (!nrow(metrics) || !nrow(available)) {
-    return(data.frame(
-      Participant = character(),
-      Category = character(),
-      Metric = character(),
-      Value = numeric(),
-      Units = character(),
-      stringsAsFactors = FALSE
-    ))
+    return(empty_metrics_display())
   }
 
   rows <- lapply(seq_len(nrow(available)), function(i) {
     spec <- available[i, , drop = FALSE]
     out <- data.frame(
-      Participant = as.character(metrics$id),
       Category = spec$category,
       Metric = spec$metric,
       Value = format_metric_value(metrics[[spec$raw_name]], spec$digits),
       Units = spec$units,
       stringsAsFactors = FALSE
     )
+    if (subject_id_filter_available(metrics)) {
+      out[["Subject ID"]] <- as.character(metrics$id)
+    }
     if ("group" %in% id_columns) {
       out$Group <- as.character(metrics$group)
     }
@@ -159,7 +177,7 @@ prepare_metrics_display <- function(metrics) {
   })
 
   out <- do.call(rbind, rows)
-  leading <- c("Participant", intersect(c("Group", "Visit"), names(out)))
+  leading <- c(intersect("Subject ID", names(out)), intersect(c("Group", "Visit"), names(out)))
   out <- out[, c(leading, "Category", "Metric", "Value", "Units"), drop = FALSE]
   row.names(out) <- NULL
   out
@@ -178,8 +196,8 @@ filter_metrics_display <- function(
   visit <- normalize_filter_value(visit)
   category <- normalize_filter_value(category)
 
-  if (nzchar(participant %||% "")) {
-    display <- display[display$Participant == participant, , drop = FALSE]
+  if ("Subject ID" %in% names(display) && nzchar(participant %||% "")) {
+    display <- display[display[["Subject ID"]] == participant, , drop = FALSE]
   }
   if ("Group" %in% names(display) && nzchar(group %||% "")) {
     display <- display[display$Group == group, , drop = FALSE]

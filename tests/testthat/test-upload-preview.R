@@ -44,7 +44,7 @@ test_that("mapping choices support multi-file filename ids and first-render colu
   expect_equal(unname(choices$optional_choices), c("", "time", "glucose", "group", ".source_id"))
 })
 
-test_that("mapping choices keep single-file participant id guessing", {
+test_that("mapping choices keep single-file subject id optional", {
   uploaded <- list(
     upload_mode = "single_file",
     data = data.frame(
@@ -61,6 +61,17 @@ test_that("mapping choices keep single-file participant id guessing", {
   expect_equal(choices$timestamp, "")
   expect_equal(choices$glucose, "")
   expect_equal(unname(choices$required_choices), c("", "subject_id", "timestamp", "glucose"))
+})
+
+test_that("subject id mapping labels and status use filename fallback", {
+  single <- list(upload_mode = "single_file")
+  multi <- list(upload_mode = "multi_file")
+
+  expect_equal(subject_id_mapping_label(single), "Subject ID (optional)")
+  expect_equal(subject_id_mapping_label(multi), "Subject ID")
+  expect_equal(subject_id_status_value(single, ""), "File name")
+  expect_equal(subject_id_status_value(single, "subject_id"), "subject_id")
+  expect_equal(subject_id_status_value(multi, "ignored_column"), "File name")
 })
 
 test_that("column mapping UI hides group, visit, device, and date order controls", {
@@ -109,17 +120,17 @@ collect_tag_classes <- function(ui) {
   classes
 }
 
-test_that("data tab renders preprocessing before upload preview", {
+test_that("data tab hides downstream workflow before upload", {
   ids <- collect_tag_ids(app_ui())
 
-  expect_gt(
-    match("preprocessing-tir_lower", ids),
-    match("column_mapping-mapping_note", ids)
-  )
-  expect_gt(
-    match("upload-preview_rows", ids),
-    match("preprocessing-tir_lower", ids)
-  )
+  expect_true("upload-cgm_files" %in% ids)
+  expect_true("upload-load_demo" %in% ids)
+  expect_true("data_upload_hint" %in% ids)
+  expect_true("data_mapping_ui" %in% ids)
+  expect_true("data_workflow_ui" %in% ids)
+  expect_false("column_mapping-mapping_note" %in% ids)
+  expect_false("preprocessing-tir_lower" %in% ids)
+  expect_false("upload-preview_rows" %in% ids)
 })
 
 test_that("navbar exposes stable selected tab id and spinner-wrapped heavy outputs", {
@@ -131,9 +142,12 @@ test_that("navbar exposes stable selected tab id and spinner-wrapped heavy outpu
   expect_true(any(grepl("load-container", classes, fixed = TRUE)))
   expect_true("metrics-metrics_table" %in% ids)
   expect_true("qc-qc_table" %in% ids)
-  expect_true("qc-missingness_participant" %in% ids)
+  expect_true("qc-missingness_subject_filter" %in% ids)
+  expect_false("qc-missingness_participant" %in% ids)
   expect_true("qc-missingness_heatmap" %in% ids)
   expect_false("qc-missingness_timeline" %in% ids)
+  expect_true("plots-subject_filter" %in% ids)
+  expect_false("plots-participant" %in% ids)
   expect_true("plots-active_plot" %in% ids)
   expect_false("plots-plot_detail" %in% ids)
   expect_true("stats-test_result" %in% ids)

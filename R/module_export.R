@@ -29,7 +29,7 @@ export_module_server <- function(id, standardized, analysis_data, metrics, qc_su
 
     output$download_qc <- shiny::downloadHandler(
       filename = function() "cgm_qc_summary.csv",
-      content = function(file) utils::write.csv(qc_summary(), file, row.names = FALSE)
+      content = function(file) utils::write.csv(prepare_qc_display(qc_summary(), analysis_data()), file, row.names = FALSE)
     )
 
     output$download_settings <- shiny::downloadHandler(

@@ -1,7 +1,8 @@
 qc_module_ui <- function(id) {
   ns <- shiny::NS(id)
-  shiny::tagList(
-    shiny::h3("Quality Control"),
+    shiny::tagList(
+      shiny::h3("Quality Control"),
+    shinycssloaders::withSpinner(shiny::uiOutput(ns("qc_summary_cards")), type = 4),
     shiny::h4("Analysis Data QC"),
     shinycssloaders::withSpinner(DT::DTOutput(ns("qc_table")), type = 4),
     shiny::h4("Imputation Status"),
@@ -12,11 +13,7 @@ qc_module_ui <- function(id) {
     shiny::fluidRow(
       shiny::column(
         3,
-        shiny::selectInput(
-          ns("missingness_participant"),
-          "Participant",
-          choices = filter_select_choices(character())
-        )
+        shiny::uiOutput(ns("missingness_subject_filter"))
       )
     ),
     shinycssloaders::withSpinner(plotly::plotlyOutput(ns("missingness_heatmap"), height = "420px"), type = 4)
@@ -66,14 +63,27 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
     cgm_data_signature(analysis_data())
     )
 
-    shiny::observe({
+    output$missingness_subject_filter <- shiny::renderUI({
       req_active_tab(active_tab, "quality")
-      ids <- sort(unique(as.character(analysis_data()$id)))
-      update_filter_select(session, "missingness_participant", ids, selected = input$missingness_participant)
+      data <- analysis_data()
+      if (!subject_id_filter_available(data)) {
+        return(NULL)
+      }
+      choices <- filter_select_choices(sort(subject_id_values(data)), all_label = "All")
+      shiny::selectInput(
+        session$ns("missingness_participant"),
+        "Subject ID",
+        choices = choices,
+        selected = preserve_filter_selection(input$missingness_participant, choices)
+      )
     })
 
     output$qc_table <- DT::renderDT({
-      DT::datatable(qc_summary(), options = list(scrollX = TRUE, pageLength = 10))
+      DT::datatable(prepare_qc_display(qc_summary(), analysis_data()), options = list(scrollX = TRUE, pageLength = 10))
+    })
+
+    output$qc_summary_cards <- shiny::renderUI({
+      summary_card_ui(quality_summary_cards(analysis_data(), qc_summary(), missingness_comparison()), compact = TRUE)
     })
 
     output$imputation_status <- shiny::renderUI({

@@ -115,6 +115,100 @@ test_that("daily coverage calendar includes no-data days and coverage details", 
   expect_true(all(c("week_index", "weekday_index", "plot_y") %in% names(calendar)))
 })
 
+test_that("daily coverage calendar uses subject active date spans", {
+  data <- data.frame(
+    id = c("A", "A", "B", "B"),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-01-01 00:00:00",
+      "2026-01-03 00:00:00",
+      "2026-03-01 00:00:00",
+      "2026-03-02 00:00:00"
+    )),
+    glucose = c(100, 120, 130, 140),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    visit = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = FALSE,
+    id_source = subject_id_source_mapped(),
+    stringsAsFactors = FALSE
+  )
+
+  calendar <- compute_missingness_calendar_data(data)
+  a_dates <- calendar$date[calendar$id == "A"]
+  b_dates <- calendar$date[calendar$id == "B"]
+
+  expect_equal(a_dates, as.Date(c("2026-01-01", "2026-01-02", "2026-01-03")))
+  expect_equal(b_dates, as.Date(c("2026-03-01", "2026-03-02")))
+  expect_false(any(calendar$id == "A" & calendar$date >= as.Date("2026-03-01")))
+  expect_false(any(calendar$id == "B" & calendar$date <= as.Date("2026-01-03")))
+  expect_equal(
+    as.character(calendar$coverage_status[calendar$id == "A" & calendar$date == as.Date("2026-01-02")]),
+    "No data"
+  )
+  expect_true(all(c("month_index", "week_of_month", "calendar_x") %in% names(calendar)))
+  expect_lte(
+    min(calendar$calendar_x[calendar$id == "B"]) - max(calendar$calendar_x[calendar$id == "A"]),
+    2
+  )
+  expect_lt(max(calendar$calendar_x), 5)
+})
+
+test_that("daily coverage month ticks use compact chronological positions", {
+  data <- data.frame(
+    id = c("A", "B"),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-01-01 00:00:00",
+      "2026-05-01 00:00:00"
+    )),
+    glucose = c(100, 120),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    visit = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = FALSE,
+    id_source = subject_id_source_mapped(),
+    stringsAsFactors = FALSE
+  )
+
+  calendar <- compute_missingness_calendar_data(data)
+  ticks <- missingness_calendar_month_ticks(calendar)
+
+  expect_equal(as.character(ticks$month), c("Jan 2026", "May 2026"))
+  expect_lt(diff(ticks$calendar_x), 3)
+})
+
+test_that("daily coverage plot filters subject before calendar expansion", {
+  data <- data.frame(
+    id = c("A", "A", "B", "B"),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-01-01 00:00:00",
+      "2026-01-03 00:00:00",
+      "2026-03-01 00:00:00",
+      "2026-03-02 00:00:00"
+    )),
+    glucose = c(100, 120, 130, 140),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    visit = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = FALSE,
+    id_source = subject_id_source_mapped(),
+    stringsAsFactors = FALSE
+  )
+
+  plot <- create_missingness_heatmap_plot(data, participant = "B")
+  built <- plotly::plotly_build(plot)
+  hover_text <- unlist(lapply(built$x$data, `[[`, "text"), use.names = FALSE)
+
+  expect_s3_class(plot, "plotly")
+  expect_true(any(grepl("Subject ID: B", hover_text, fixed = TRUE)))
+  expect_false(any(grepl("Subject ID: A", hover_text, fixed = TRUE)))
+})
+
 test_that("daily coverage is capped at 100 percent", {
   timestamps <- c(
     seq(
@@ -177,11 +271,11 @@ test_that("missingness comparison reports original and analysis data counts", {
 
   comparison <- compare_missingness_summaries(standardized, analysis, valid_day_hours = 14)
 
-  expect_equal(comparison$Participant, c("GAP001", "GAP002"))
+  expect_equal(comparison[["Subject ID"]], c("GAP001", "GAP002"))
   expect_equal(
     names(comparison),
     c(
-      "Participant",
+      "Subject ID",
       "Missing glucose",
       "Missing glucose rate (%)",
       "Missing glucose after preprocessing",
@@ -197,6 +291,26 @@ test_that("missingness comparison reports original and analysis data counts", {
   expect_equal(comparison[["Filled glucose rows"]], c(1, 1))
   expect_equal(comparison[["Timestamp gaps"]], c(1, 0))
   expect_equal(comparison[["Estimated missing readings"]], c(2, 0))
+})
+
+test_that("missingness comparison hides Subject ID for one filename-derived subject", {
+  original <- data.frame(
+    id = "FallbackA",
+    id_source = subject_id_source_filename(),
+    timestamp = parse_cgm_timestamp(c("2026-05-05 08:00:00", "2026-05-05 08:05:00")),
+    glucose = c(100, NA),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    visit = NA_character_,
+    source_file = "FallbackA.csv",
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  comparison <- compare_missingness_summaries(original, original, valid_day_hours = 14)
+
+  expect_false("Subject ID" %in% names(comparison))
 })
 
 test_that("analysis missingness table visibility follows imputation setting", {

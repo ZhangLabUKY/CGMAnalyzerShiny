@@ -1,5 +1,5 @@
 default_metric_groups <- function(data) {
-  groups <- c("id", "group", "visit")
+  groups <- c("id", "id_source", "group", "visit")
   groups[groups %in% names(data)]
 }
 
@@ -105,6 +105,71 @@ compute_base_core_metrics <- function(
   row.names(out) <- NULL
   out$metric_engine <- "base_fallback"
   out
+}
+
+metric_state <- function(status, data = NULL, base = data.frame(), display = empty_metrics_display(), error = NULL, message = NULL) {
+  messages <- list(
+    needs_mapping = "Select timestamp and glucose columns to calculate metrics.",
+    no_analysis_rows = "No CGM rows are available for the selected analysis date range.",
+    base_ready = "",
+    base_error = "Metrics could not be calculated from the current analysis data. Check timestamp and glucose mappings."
+  )
+  list(
+    status = status,
+    data = data,
+    base = base,
+    display = display,
+    error = error,
+    message = message %||% messages[[status]] %||% ""
+  )
+}
+
+compute_base_metric_state <- function(data, thresholds = default_cgm_thresholds()) {
+  if (is.null(data) || !is.data.frame(data)) {
+    return(metric_state("needs_mapping"))
+  }
+
+  missing_columns <- setdiff(c("id", "timestamp", "glucose"), names(data))
+  if (length(missing_columns)) {
+    return(metric_state(
+      "needs_mapping",
+      data = data,
+      error = paste("Missing standardized column(s):", paste(missing_columns, collapse = ", "))
+    ))
+  }
+
+  if (!nrow(data)) {
+    return(metric_state("no_analysis_rows", data = data))
+  }
+  if (!valid_metric_thresholds(thresholds)) {
+    return(metric_state("base_error", data = data, error = "Invalid metric threshold settings."))
+  }
+
+  tryCatch({
+    base <- compute_base_core_metrics(data, thresholds = thresholds)
+    display <- prepare_metrics_display(base)
+    if (!nrow(base) || !nrow(display)) {
+      return(metric_state("no_analysis_rows", data = data, base = base, display = display))
+    }
+    metric_state("base_ready", data = data, base = base, display = display)
+  }, error = function(error) {
+    metric_state("base_error", data = data, error = conditionMessage(error))
+  })
+}
+
+should_start_additional_metrics <- function(state) {
+  identical(state$status, "base_ready") && is.data.frame(state$base) && nrow(state$base) > 0L
+}
+
+valid_metric_thresholds <- function(thresholds) {
+  required <- names(default_cgm_thresholds())
+  if (!all(required %in% names(thresholds))) {
+    return(FALSE)
+  }
+  all(vapply(required, function(name) {
+    value <- thresholds[[name]]
+    is.numeric(value) && length(value) == 1L && is.finite(value)
+  }, logical(1)))
 }
 
 compute_metric_adapters <- function(

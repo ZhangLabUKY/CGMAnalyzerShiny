@@ -18,7 +18,7 @@ test_that("prepare_metrics_display returns readable long-format rows", {
   )
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
-  expect_true(all(c("Participant", "Group", "Visit", "Category", "Metric", "Value", "Units") %in% names(display)))
+  expect_true(all(c("Subject ID", "Group", "Visit", "Category", "Metric", "Value", "Units") %in% names(display)))
   expect_true(nrow(display) > 20)
   expect_true(all(c("Data Coverage", "Central Tendency", "Variability", "Time in Range", "Detailed Range Bands", "Risk", "Excursions") %in% display$Category))
   expect_true("Mean glucose" %in% display$Metric)
@@ -33,7 +33,7 @@ test_that("metric display avoids wide debug columns on demo metrics", {
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
   expect_lte(ncol(display), 7)
-  expect_equal(sort(unique(display$Participant)), c("CGM001", "CGM002"))
+  expect_equal(sort(unique(display[["Subject ID"]])), c("CGM001", "CGM002"))
 })
 
 test_that("core range metrics and detailed bands use separate categories", {
@@ -111,4 +111,21 @@ test_that("All filter sentinel returns all metric display rows", {
   )
 
   expect_equal(filtered, display)
+})
+
+test_that("metric display hides Subject ID for one filename-derived subject", {
+  raw <- data.frame(
+    time = c("2026-05-05 08:00:00", "2026-05-05 08:05:00"),
+    glucose = c(100, 110),
+    .source_id = "one_subject",
+    stringsAsFactors = FALSE
+  )
+  standardized <- standardize_cgm_data(
+    raw,
+    mapping = list(id = "", timestamp = "time", glucose = "glucose")
+  )
+  display <- prepare_metrics_display(compute_base_core_metrics(standardized))
+
+  expect_false("Subject ID" %in% names(display))
+  expect_equal(filter_metrics_display(display, participant = "one_subject"), display)
 })

@@ -29,6 +29,14 @@ guess_column <- function(columns, patterns) {
   if (length(hit)) hit[[1L]] else ""
 }
 
+subject_id_mapping_label <- function(upload) {
+  if (is_multi_file_upload(upload)) "Subject ID" else "Subject ID (optional)"
+}
+
+subject_id_status_value <- function(upload, id_mapping = "") {
+  if (is_multi_file_upload(upload) || !nzchar(id_mapping %||% "")) "File name" else id_mapping
+}
+
 column_mapping_module_server <- function(id, uploaded) {
   shiny::moduleServer(id, function(input, output, session) {
     output$mapping_note <- shiny::renderUI({
@@ -36,7 +44,7 @@ column_mapping_module_server <- function(id, uploaded) {
       if (is_multi_file_upload(upload)) {
         shiny::div(
           class = "alert alert-info",
-          "Multiple files detected. Participant IDs will be taken from file names."
+          "Multiple files detected. Subject IDs will be taken from file names."
         )
       }
     })
@@ -45,12 +53,12 @@ column_mapping_module_server <- function(id, uploaded) {
       upload <- uploaded()
       if (is_multi_file_upload(upload)) {
         shiny::tagList(
-          shiny::tags$label("Participant ID"),
+          shiny::tags$label(subject_id_mapping_label(upload)),
           shiny::div(class = "form-control", "File name")
         )
       } else {
         choices <- mapping_choices_for_upload(upload)
-        shiny::selectInput(session$ns("id_col"), "Participant ID", choices = choices$required_choices, selected = "")
+        shiny::selectInput(session$ns("id_col"), subject_id_mapping_label(upload), choices = choices$required_choices, selected = "")
       }
     })
 
@@ -82,12 +90,12 @@ column_mapping_module_server <- function(id, uploaded) {
     output$mapping_status <- shiny::renderUI({
       map <- mapping()
       upload <- uploaded()
-      id_label <- if (is_multi_file_upload(upload)) "File name" else map$id %||% ""
+      id_label <- subject_id_status_value(upload, map$id)
       shiny::tags$p(
         style = "margin-top: 8px; color: #555;",
         paste(
           "Current mapping:",
-          "Participant ID =", id_label,
+          "Subject ID =", id_label,
           "| Timestamp =", map$timestamp %||% "",
           "| Glucose =", map$glucose %||% "",
           "| Units =", map$source_units %||% "mg/dL"

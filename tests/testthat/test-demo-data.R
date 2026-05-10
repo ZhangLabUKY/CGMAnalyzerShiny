@@ -1,9 +1,10 @@
 test_that("bundled demo data loads and standardizes", {
   demo <- load_demo_cgm_data()
 
-  expect_named(demo, c("id", "time", "glucose", "group", "visit", "device"))
+  expect_named(demo, c("id", "time", "glucose", "group", "visit", "device", ".source_file", ".source_id"))
   expect_equal(nrow(demo), 144)
   expect_equal(sort(unique(demo$id)), c("CGM001", "CGM002"))
+  expect_equal(unique(demo$.source_id), "demo_cgm")
 
   standardized <- standardize_cgm_data(
     demo,

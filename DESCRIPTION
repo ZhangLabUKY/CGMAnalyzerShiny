@@ -26,6 +26,7 @@ Imports:
     DT,
     future,
     ggplot2,
+    later,
     plotly,
     promises,
     readr,

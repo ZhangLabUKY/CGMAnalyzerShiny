@@ -70,8 +70,9 @@ test_that("standardize_cgm_data maps required and optional columns", {
     units = "mg/dL"
   )
 
-  expect_named(out, c("id", "timestamp", "glucose", "units", "device", "group", "visit", "source_file", "imputed_flag"))
+  expect_named(out, c("id", "id_source", "timestamp", "glucose", "units", "device", "group", "visit", "source_file", "imputed_flag"))
   expect_equal(out$id, c("A", "A", "B"))
+  expect_equal(unique(out$id_source), subject_id_source_mapped())
   expect_equal(out$group, c("Control", "Control", "Treatment"))
   expect_true(all(out$units == "mg/dL"))
   expect_true(all(out$imputed_flag == FALSE))
@@ -158,7 +159,33 @@ test_that("read_cgm_file adds source file and filename-derived source id", {
   expect_equal(derive_source_id("Patient-002.csv"), "Patient-002")
 })
 
-test_that("single-file standardization requires participant id mapping", {
+test_that("single-file standardization uses selected or filename-derived subject ids", {
+  raw <- data.frame(
+    subject = "SelectedA",
+    time = "2026-05-05 08:00:00",
+    glucose = 100,
+    .source_file = "FallbackA.csv",
+    .source_id = "FallbackA",
+    stringsAsFactors = FALSE
+  )
+
+  selected <- standardize_cgm_data(
+    raw,
+    mapping = list(id = "subject", timestamp = "time", glucose = "glucose")
+  )
+  fallback <- standardize_cgm_data(
+    raw,
+    mapping = list(id = "", timestamp = "time", glucose = "glucose")
+  )
+
+  expect_equal(selected$id, "SelectedA")
+  expect_equal(selected$id_source, subject_id_source_mapped())
+  expect_equal(fallback$id, "FallbackA")
+  expect_equal(fallback$id_source, subject_id_source_filename())
+  expect_equal(fallback$source_file, "FallbackA.csv")
+})
+
+test_that("single-file standardization errors when subject id and filename fallback are absent", {
   raw <- data.frame(
     time = "2026-05-05 08:00:00",
     glucose = 100,
@@ -189,6 +216,7 @@ test_that("multi-file standardization uses filename-derived participant ids", {
   )
 
   expect_equal(out$id, c("PatientA", "PatientA"))
+  expect_equal(unique(out$id_source), subject_id_source_filename())
   expect_equal(out$group, c("Control", "Control"))
   expect_equal(out$source_file, c("PatientA.csv", "PatientA.csv"))
 })
@@ -212,5 +240,18 @@ test_that("multiple uploaded files combine while preserving source fields", {
   )
 
   expect_equal(out$id, c("A", "B"))
+  expect_equal(out$id_source, c(subject_id_source_filename(), subject_id_source_filename()))
   expect_equal(out$visit, c("Baseline", "Baseline"))
+})
+
+test_that("subject id visibility helpers distinguish mapped and filename-derived ids", {
+  mapped <- data.frame(id = "A", id_source = subject_id_source_mapped(), stringsAsFactors = FALSE)
+  single_filename <- data.frame(id = "A", id_source = subject_id_source_filename(), stringsAsFactors = FALSE)
+  multi_filename <- data.frame(id = c("A", "B"), id_source = subject_id_source_filename(), stringsAsFactors = FALSE)
+
+  expect_true(has_user_subject_id(mapped))
+  expect_false(has_user_subject_id(single_filename))
+  expect_true(subject_id_filter_available(mapped))
+  expect_false(subject_id_filter_available(single_filename))
+  expect_true(subject_id_filter_available(multi_filename))
 })

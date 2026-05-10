@@ -154,9 +154,14 @@ compute_missingness_heatmap_data <- function(data, gaps = NULL) {
   daily$estimated_missing_readings[is.na(daily$estimated_missing_readings)] <- 0L
 
   daily <- daily[order(id, date)]
+  subject_prefix <- if (subject_id_filter_available(data)) {
+    paste0("Subject ID: ", daily$id, "<br>")
+  } else {
+    ""
+  }
   daily$tooltip <- paste0(
-    "Participant: ", daily$id,
-    "<br>Date: ", daily$date,
+    subject_prefix,
+    "Date: ", daily$date,
     "<br>Readings: ", daily$readings,
     "<br>Missing glucose: ", daily$missing_glucose,
     "<br>Missing glucose rate: ", daily$missing_glucose_rate, "%",
@@ -242,19 +247,108 @@ daily_coverage_date_span <- function(data, date_range = NULL) {
   c(start = min(dates), end = max(dates))
 }
 
+subject_active_date_spans <- function(data, date_range = NULL) {
+  if (!nrow(data) || !"id" %in% names(data) || !"timestamp" %in% names(data)) {
+    return(data.frame(id = character(), start = as.Date(character()), end = as.Date(character())))
+  }
+
+  finite <- is_finite_cgm_timestamp(data$timestamp)
+  if (!any(finite)) {
+    return(data.frame(id = character(), start = as.Date(character()), end = as.Date(character())))
+  }
+
+  dt <- data.table::as.data.table(data[finite, c("id", "timestamp"), drop = FALSE])
+  dt[, id := as.character(id)]
+  dt <- dt[!is.na(id) & nzchar(id)]
+  if (!nrow(dt)) {
+    return(data.frame(id = character(), start = as.Date(character()), end = as.Date(character())))
+  }
+
+  dt[, date := as.Date(timestamp)]
+  spans <- dt[, list(start = min(date, na.rm = TRUE), end = max(date, na.rm = TRUE)), by = id]
+
+  if (!is.null(date_range)) {
+    range <- normalize_analysis_date_range(date_range, data)
+    range_start <- as.Date(range[["start"]])
+    range_end <- as.Date(range[["end"]])
+    if (!is.na(range_start)) {
+      spans[, start := pmax(start, range_start)]
+    }
+    if (!is.na(range_end)) {
+      spans[, end := pmin(end, range_end)]
+    }
+  }
+
+  spans <- spans[!is.na(start) & !is.na(end) & start <= end]
+  spans <- spans[order(id)]
+  as.data.frame(spans, stringsAsFactors = FALSE)
+}
+
+expand_subject_active_dates <- function(spans) {
+  if (!nrow(spans)) {
+    return(data.frame(id = character(), date = as.Date(character()), stringsAsFactors = FALSE))
+  }
+
+  rows <- lapply(seq_len(nrow(spans)), function(i) {
+    data.frame(
+      id = spans$id[[i]],
+      date = seq(spans$start[[i]], spans$end[[i]], by = "day"),
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+
+add_compact_calendar_positions <- function(daily, ids) {
+  if (!nrow(daily)) {
+    return(daily)
+  }
+
+  daily$month_start <- as.Date(format(daily$date, "%Y-%m-01"))
+  daily$month <- format(daily$date, "%b %Y")
+  daily$week_start <- week_start_date(daily$date)
+  daily$weekday <- weekday_label(daily$date)
+  daily$weekday_index <- match(as.character(daily$weekday), c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
+
+  week_map <- unique(daily[, c("month_start", "week_start"), drop = FALSE])
+  week_map <- week_map[order(week_map$month_start, week_map$week_start), , drop = FALSE]
+  week_map$week_of_month <- ave(seq_len(nrow(week_map)), week_map$month_start, FUN = seq_along)
+
+  month_width <- stats::aggregate(week_of_month ~ month_start, data = week_map, FUN = max)
+  month_width <- month_width[order(month_width$month_start), , drop = FALSE]
+  month_width$month_index <- seq_len(nrow(month_width))
+  month_width$month_offset <- c(0L, cumsum(head(month_width$week_of_month + 1L, -1L)))
+
+  daily <- merge(daily, week_map, by = c("month_start", "week_start"), all.x = TRUE, sort = FALSE)
+  daily <- merge(
+    daily,
+    month_width[, c("month_start", "month_index", "month_offset"), drop = FALSE],
+    by = "month_start",
+    all.x = TRUE,
+    sort = FALSE
+  )
+  daily$calendar_x <- daily$month_offset + daily$week_of_month
+  daily$week_index <- daily$calendar_x
+
+  id_index <- match(as.character(daily$id), ids)
+  daily$plot_y <- (id_index - 1L) * 8L + daily$weekday_index
+  daily <- daily[order(daily$id, daily$calendar_x, daily$weekday_index), , drop = FALSE]
+  daily$month <- factor(daily$month, levels = unique(daily$month[order(daily$month_start)]), ordered = TRUE)
+  daily
+}
+
 compute_missingness_calendar_data <- function(data, gaps = NULL, date_range = NULL) {
   daily <- compute_missingness_heatmap_data(data, gaps = gaps)
   if (!nrow(data) || !"id" %in% names(data)) {
     return(empty_missingness_calendar_data())
   }
 
-  ids <- sort(unique(as.character(data$id[!is.na(data$id) & nzchar(as.character(data$id))])))
-  span <- daily_coverage_date_span(data, date_range = date_range)
-  if (!length(ids) || is.na(span[["start"]]) || is.na(span[["end"]])) {
+  spans <- subject_active_date_spans(data, date_range = date_range)
+  ids <- spans$id
+  if (!length(ids)) {
     return(empty_missingness_calendar_data())
   }
 
-  full_dates <- seq(span[["start"]], span[["end"]], by = "day")
   if (!nrow(daily)) {
     daily <- data.frame(
       id = character(),
@@ -274,11 +368,7 @@ compute_missingness_calendar_data <- function(data, gaps = NULL, date_range = NU
   intervals <- qc$median_interval_minutes
   names(intervals) <- qc$id
   expected_lookup <- ifelse(!is.na(intervals) & intervals > 0, round(24 * 60 / intervals), NA_real_)
-  complete <- expand.grid(
-    id = ids,
-    date = full_dates,
-    stringsAsFactors = FALSE
-  )
+  complete <- expand_subject_active_dates(spans)
   complete$date <- as.Date(complete$date)
   daily <- merge(complete, daily, by = c("id", "date"), all.x = TRUE, sort = FALSE)
   daily$readings[is.na(daily$readings)] <- 0L
@@ -294,9 +384,14 @@ compute_missingness_calendar_data <- function(data, gaps = NULL, date_range = NU
   )
   daily$coverage_status <- coverage_status(daily$coverage_percent, daily$readings)
   daily$missing_glucose_rate[is.na(daily$missing_glucose_rate) & daily$readings == 0L] <- NA_real_
+  subject_prefix <- if (subject_id_filter_available(data)) {
+    paste0("Subject ID: ", daily$id, "<br>")
+  } else {
+    ""
+  }
   daily$tooltip <- paste0(
-    "Participant: ", daily$id,
-    "<br>Date: ", daily$date,
+    subject_prefix,
+    "Date: ", daily$date,
     "<br>Status: ", daily$coverage_status,
     "<br>Readings: ", daily$readings,
     "<br>Expected readings: ", ifelse(is.na(daily$expected_readings), "unknown", daily$expected_readings),
@@ -307,20 +402,7 @@ compute_missingness_calendar_data <- function(data, gaps = NULL, date_range = NU
     "<br>Estimated missing readings: ", daily$estimated_missing_readings,
     "<br>Imputed rows: ", daily$imputed_rows
   )
-  daily$month_start <- as.Date(format(daily$date, "%Y-%m-01"))
-  daily$month <- format(daily$date, "%b %Y")
-  daily$week_start <- week_start_date(daily$date)
-  first_week <- min(daily$week_start, na.rm = TRUE)
-  daily$week_index <- as.integer((daily$week_start - first_week) / 7) + 1L
-  daily$weekday <- weekday_label(daily$date)
-  daily$weekday_index <- match(as.character(daily$weekday), c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
-  id_index <- match(as.character(daily$id), ids)
-  daily$plot_y <- (id_index - 1L) * 8L + daily$weekday_index
-  daily$week_of_month <- daily$week_index
-  daily$calendar_x <- daily$week_index
-  daily <- daily[order(daily$id, daily$week_index, daily$weekday_index), , drop = FALSE]
-  daily$month <- factor(daily$month, levels = unique(daily$month), ordered = TRUE)
-  daily
+  add_compact_calendar_positions(daily, ids)
 }
 
 filter_missingness_calendar_participant <- function(calendar_data, participant = "") {
@@ -367,8 +449,8 @@ compare_missingness_summaries <- function(original_data, analysis_data, valid_da
   analysis_match <- match(ids, analysis$id)
   filled <- filled_glucose_by_id(original_data, analysis_data, ids)
 
-  data.frame(
-    Participant = ids,
+  out <- data.frame(
+    `Subject ID` = ids,
     `Missing glucose` = original$missing_glucose[original_match],
     `Missing glucose rate (%)` = original$missing_glucose_rate[original_match],
     `Missing glucose after preprocessing` = analysis$missing_glucose[analysis_match],
@@ -380,6 +462,10 @@ compare_missingness_summaries <- function(original_data, analysis_data, valid_da
     check.names = FALSE,
     stringsAsFactors = FALSE
   )
+  if (!subject_id_filter_available(analysis_data)) {
+    out <- out[, setdiff(names(out), "Subject ID"), drop = FALSE]
+  }
+  out
 }
 
 should_show_analysis_missingness <- function(settings) {
@@ -469,7 +555,7 @@ create_missingness_timeline_plot <- function(data) {
     ggplot2::scale_color_manual(
       values = c("Observed" = "#219653", "Missing glucose" = "#EB5757", "Imputed" = "#2F80ED")
     ) +
-    ggplot2::labs(x = NULL, y = "Participant", color = NULL) +
+    ggplot2::labs(x = NULL, y = "Subject ID", color = NULL) +
     ggplot2::theme_minimal(base_size = 12) +
     ggplot2::theme(legend.position = "bottom")
 
@@ -504,7 +590,7 @@ empty_missingness_calendar_plot <- function(message = "No valid timestamps avail
   )
 }
 
-missingness_calendar_axis_labels <- function(calendar_data) {
+missingness_calendar_axis_labels <- function(calendar_data, show_subject_id = TRUE) {
   weekdays <- c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
   ids <- unique(as.character(calendar_data$id))
   ticks <- data.frame(
@@ -515,23 +601,35 @@ missingness_calendar_axis_labels <- function(calendar_data) {
   ticks$weekday_index <- match(ticks$weekday, weekdays)
   ticks$id_index <- match(ticks$id, ids)
   ticks$plot_y <- (ticks$id_index - 1L) * 8L + ticks$weekday_index
-  ticks$label <- ifelse(ticks$weekday == "Mon", paste0(ticks$id, "  ", ticks$weekday), paste0("      ", ticks$weekday))
+  ticks$label <- if (isTRUE(show_subject_id)) {
+    ifelse(ticks$weekday == "Mon", paste0(ticks$id, "  ", ticks$weekday), paste0("      ", ticks$weekday))
+  } else {
+    as.character(ticks$weekday)
+  }
   ticks
 }
 
 missingness_calendar_month_ticks <- function(calendar_data) {
-  months <- unique(calendar_data[, c("month", "week_index"), drop = FALSE])
+  months <- unique(calendar_data[, c("month", "calendar_x"), drop = FALSE])
   months[!duplicated(months$month), , drop = FALSE]
 }
 
 create_missingness_heatmap_plot <- function(data, gaps = NULL, participant = "", date_range = NULL) {
+  show_subject_id <- subject_id_filter_available(data)
+  participant <- normalize_filter_value(participant)
+  if (nzchar(participant)) {
+    data <- data[data$id == participant, , drop = FALSE]
+    if (!is.null(gaps) && nrow(gaps) && "id" %in% names(gaps)) {
+      gaps <- gaps[gaps$id == participant, , drop = FALSE]
+    }
+  }
+
   calendar_data <- compute_missingness_calendar_data(data, gaps = gaps, date_range = date_range)
-  calendar_data <- filter_missingness_calendar_participant(calendar_data, participant = participant)
   if (!nrow(calendar_data)) {
     return(empty_missingness_calendar_plot())
   }
 
-  y_labels <- missingness_calendar_axis_labels(calendar_data)
+  y_labels <- missingness_calendar_axis_labels(calendar_data, show_subject_id = show_subject_id)
   month_ticks <- missingness_calendar_month_ticks(calendar_data)
   plot <- plotly::plot_ly()
   statuses <- levels(calendar_data$coverage_status)
@@ -544,7 +642,7 @@ create_missingness_heatmap_plot <- function(data, gaps = NULL, participant = "",
     plot <- plotly::add_markers(
       plot,
       data = status_data,
-      x = ~week_index,
+      x = ~calendar_x,
       y = ~plot_y,
       name = status,
       text = ~tooltip,
@@ -566,7 +664,7 @@ create_missingness_heatmap_plot <- function(data, gaps = NULL, participant = "",
     xaxis = list(
       title = "",
       tickmode = "array",
-      tickvals = month_ticks$week_index,
+      tickvals = month_ticks$calendar_x,
       ticktext = as.character(month_ticks$month),
       showgrid = FALSE,
       zeroline = FALSE

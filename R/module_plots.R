@@ -20,24 +20,36 @@ plots_module_ui <- function(id) {
           choices = c("Trace" = "trace", "Daily overlay" = "daily_overlay", "AGP summary" = "agp")
         )
       ),
-      shiny::column(3, shiny::selectInput(ns("participant"), "Participant", choices = character())),
+      shiny::column(3, shiny::uiOutput(ns("day_filter"))),
+      shiny::column(3, shiny::uiOutput(ns("subject_filter"))),
       shiny::column(3, shiny::uiOutput(ns("group_filter")))
     ),
     shiny::fluidRow(
-      shiny::column(3, shiny::uiOutput(ns("visit_filter"))),
-      shiny::column(3, shiny::uiOutput(ns("day_filter")))
+      shiny::column(3, shiny::uiOutput(ns("visit_filter")))
     ),
+    shinycssloaders::withSpinner(shiny::uiOutput(ns("plot_summary")), type = 4),
     shinycssloaders::withSpinner(plotly::plotlyOutput(ns("active_plot"), height = "460px"), type = 4)
   )
 }
 
 plots_module_server <- function(id, standardized, metrics, settings, active_tab = NULL) {
   shiny::moduleServer(id, function(input, output, session) {
-    shiny::observeEvent(standardized(), {
+    day_selection <- shiny::reactiveVal(all_filter_value())
+
+    output$subject_filter <- shiny::renderUI({
       req_active_tab(active_tab, "plots")
-      ids <- unique(standardized()$id)
-      update_filter_select(session, "participant", sort(ids), selected = input$participant)
-    }, ignoreInit = FALSE)
+      data <- standardized()
+      if (!subject_id_filter_available(data)) {
+        return(NULL)
+      }
+      choices <- plot_subject_filter_choices(data)
+      shiny::selectInput(
+        session$ns("participant"),
+        "Subject ID",
+        choices = choices,
+        selected = preserve_filter_selection(input$participant, choices)
+      )
+    })
 
     output$group_filter <- shiny::renderUI({
       req_active_tab(active_tab, "plots")
@@ -69,23 +81,72 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
       )
     })
 
-    output$day_filter <- shiny::renderUI({
+    day_choices <- shiny::reactive({
       req_active_tab(active_tab, "plots")
       if (!identical(input$plot_type, "daily_overlay")) {
         return(NULL)
       }
-      days <- available_plot_days(
+      plot_day_filter_choices(
         standardized(),
         participant = input$participant,
         group = input$group,
         visit = input$visit
       )
-      choices <- filter_select_choices(days, all_label = "All days")
-      shiny::selectInput(
+    })
+
+    shiny::observeEvent(input$day, {
+      current <- input$day %||% character()
+      current <- as.character(current)
+      current <- trimws(current)
+      current <- current[!is.na(current) & nzchar(current)]
+      if (length(current)) {
+        day_selection(normalize_plot_days(current))
+      }
+    }, ignoreInit = TRUE)
+
+    shiny::observeEvent(day_choices(), {
+      choices <- day_choices()
+      if (is.null(choices)) {
+        return()
+      }
+      preserved <- preserve_plot_day_selection(day_selection(), choices)
+      if (!identical(preserved, day_selection())) {
+        day_selection(preserved)
+      }
+    }, ignoreInit = FALSE)
+
+    output$day_filter <- shiny::renderUI({
+      req_active_tab(active_tab, "plots")
+      choices <- day_choices()
+      if (is.null(choices)) {
+        return(NULL)
+      }
+      shiny::selectizeInput(
         session$ns("day"),
         "Day",
         choices = choices,
-        selected = preserve_filter_selection(input$day, choices)
+        selected = preserve_plot_day_selection(day_selection(), choices),
+        multiple = TRUE,
+        options = list(plugins = list("remove_button"))
+      )
+    })
+
+    normalized_day <- shiny::reactive({
+      normalize_plot_days(day_selection())
+    })
+
+    output$plot_summary <- shiny::renderUI({
+      req_active_tab(active_tab, "plots")
+      summary_card_ui(
+        plot_selection_summary(
+          standardized(),
+          plot_type = input$plot_type %||% "trace",
+          participant = input$participant,
+          group = input$group,
+          visit = input$visit,
+          day = normalized_day()
+        ),
+        compact = TRUE
       )
     })
 
@@ -100,7 +161,7 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
           participant = input$participant,
           group = input$group,
           visit = input$visit,
-          day = input$day,
+          day = normalized_day(),
           max_points_per_participant = Inf
         ))
       }
@@ -128,7 +189,7 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
     input$participant,
     input$group,
     input$visit,
-    input$day
+    plot_day_cache_key(normalized_day())
     )
 
     output$active_plot <- plotly::renderPlotly({
