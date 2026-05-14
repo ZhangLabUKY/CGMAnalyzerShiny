@@ -19,11 +19,12 @@ default_cgm_thresholds <- function() {
 #' @param valid_day_hours Minimum observed hours for a valid CGM day.
 #' @param analysis_date_range Length-two date range used to scope analysis data.
 #' @param imputation_method Imputation method label.
+#' @param imputation_backend CGMissingDataR backend, either `mice` or `sklearn`.
 #' @param selected_metrics Character vector of selected metrics.
 #' @param selected_tests Character vector of selected statistical tests.
 #'
 #' @return A named list of analysis settings.
-#' @export
+#' @noRd
 create_reproducibility_settings <- function(
   column_mapping = list(),
   thresholds = default_cgm_thresholds(),
@@ -34,6 +35,11 @@ create_reproducibility_settings <- function(
   imputation_model = "mice_only",
   imputation_seed = 42,
   imputation_available = cgmissingdata_available(),
+  imputation_backend = "mice",
+  imputation_interval_minutes = 5L,
+  imputation_arima_threshold = 0.05,
+  imputation_arima_min_history = 20L,
+  imputation_xgb_rounds = 300L,
   selected_metrics = "core",
   selected_tests = character()
 ) {
@@ -51,6 +57,11 @@ create_reproducibility_settings <- function(
     imputation_model = imputation_model,
     imputation_seed = imputation_seed,
     imputation_available = imputation_available,
+    imputation_backend = imputation_backend,
+    imputation_interval_minutes = imputation_interval_minutes,
+    imputation_arima_threshold = imputation_arima_threshold,
+    imputation_arima_min_history = imputation_arima_min_history,
+    imputation_xgb_rounds = imputation_xgb_rounds,
     selected_metrics = selected_metrics,
     selected_tests = selected_tests
   )

@@ -14,6 +14,25 @@ preview_data_rows <- function(data, row_limit = "10") {
   utils::head(data, limit)
 }
 
+prepare_upload_preview_data <- function(data, upload_mode = "single_file") {
+  internal_source_cols <- intersect(c(".source_file", ".source_id"), names(data))
+  preview <- data
+
+  if (identical(upload_mode, "multi_file") && ".source_file" %in% names(preview)) {
+    preview[["Source file"]] <- as.character(preview[[".source_file"]])
+  }
+
+  if (length(internal_source_cols) > 0L) {
+    preview <- preview[, setdiff(names(preview), internal_source_cols), drop = FALSE]
+  }
+
+  if ("Source file" %in% names(preview)) {
+    preview <- preview[, c("Source file", setdiff(names(preview), "Source file")), drop = FALSE]
+  }
+
+  preview
+}
+
 preview_dt_options <- function(page_length = 10) {
   list(
     scrollX = TRUE,
@@ -27,12 +46,20 @@ uploaded_file_names <- function(uploaded) {
   as.character(uploaded$files %||% character())
 }
 
+internal_upload_source_columns <- function() {
+  c(".source_file", ".source_id")
+}
+
+user_mapping_columns <- function(columns) {
+  setdiff(columns, internal_upload_source_columns())
+}
+
 required_mapping_choices <- function(columns) {
   c(stats::setNames("", ""), columns)
 }
 
 mapping_choices_for_upload <- function(uploaded) {
-  columns <- names(uploaded$data)
+  columns <- user_mapping_columns(names(uploaded$data))
   optional_choices <- c(stats::setNames("", ""), columns)
   list(
     columns = columns,

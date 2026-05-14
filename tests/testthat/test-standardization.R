@@ -24,6 +24,20 @@ test_that("parse_cgm_timestamp handles ISO, AM/PM, dash dates, and Excel timesta
   ))
 })
 
+test_that("parse_cgm_timestamp handles year-first colon CGM timestamps", {
+  parsed <- parse_cgm_timestamp(c(
+    "2020:01:16:00:00",
+    "2020:01:16:00:00:30",
+    "2020-01-16T00:00:00"
+  ))
+
+  expect_equal(format_cgm_timestamp_iso(parsed), c(
+    "2020-01-16T00:00:00",
+    "2020-01-16T00:00:30",
+    "2020-01-16T00:00:00"
+  ))
+})
+
 test_that("ambiguous day and month timestamps default to day first", {
   raw <- data.frame(
     id = "A",
@@ -77,6 +91,35 @@ test_that("standardize_cgm_data maps required and optional columns", {
   expect_true(all(out$units == "mg/dL"))
   expect_true(all(out$imputed_flag == FALSE))
 })
+
+test_that("example CGMissingDataR-style upload shape parses colon time and missing glucose", {
+  raw <- data.frame(
+    USUBJID = rep(c("11", "18"), each = 4),
+    LBORRES = c("150.0", "", "125.0", "132.0", "140.0", NA, "138.0", "137.0"),
+    Time = c(
+      "2020:01:16:00:00",
+      "2020:01:16:00:05",
+      "2020:01:16:00:10",
+      "2020:01:16:00:15",
+      "2020:02:20:07:45",
+      "2020:02:20:07:50",
+      "2020:02:20:07:55",
+      "2020:02:20:08:00"
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  out <- standardize_cgm_data(
+    raw,
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
+  )
+
+  expect_equal(subject_id_values(out), c("11", "18"))
+  expect_equal(sum(is.na(out$timestamp)), 0)
+  expect_equal(format_cgm_timestamp_iso(out$timestamp[[1L]]), "2020-01-16T00:00:00")
+  expect_equal(sum(is.na(out$glucose)), 2)
+})
+
 
 test_that("standardize_cgm_data converts mmol/L to mg/dL", {
   raw <- data.frame(

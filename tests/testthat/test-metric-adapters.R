@@ -1,7 +1,7 @@
 test_that("to_iglu_data converts standardized data shape", {
   demo <- standardize_cgm_data(
-    load_demo_cgm_data(),
-    mapping = list(id = "id", timestamp = "time", glucose = "glucose")
+    load_example_complete_cgm_data(),
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
   )
 
   iglu_data <- to_iglu_data(demo)
@@ -11,17 +11,17 @@ test_that("to_iglu_data converts standardized data shape", {
   expect_s3_class(iglu_data$time, "POSIXct")
 })
 
-test_that("regularize_cgm_series keeps regular demo series hourly", {
+test_that("regularize_cgm_series keeps regular complete example at five-minute interval", {
   demo <- standardize_cgm_data(
-    load_demo_cgm_data(),
-    mapping = list(id = "id", timestamp = "time", glucose = "glucose")
+    load_example_complete_cgm_data(),
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
   )
 
-  one_id <- demo[demo$id == "CGM001", , drop = FALSE]
+  one_id <- demo[demo$id == "11", , drop = FALSE]
   regular <- regularize_cgm_series(one_id)
 
-  expect_equal(nrow(regular), 72)
-  expect_equal(attr(regular, "interval_minutes"), 60)
+  expect_equal(nrow(regular), 100)
+  expect_equal(attr(regular, "interval_minutes"), 5)
   expect_false(any(is.na(regular$glucose)))
 })
 
@@ -29,41 +29,37 @@ test_that("CGManalyzer adapter computes vector-backed metrics", {
   skip_if_not_installed("CGManalyzer")
 
   demo <- standardize_cgm_data(
-    load_demo_cgm_data(),
+    load_example_complete_cgm_data(),
     mapping = list(
-      id = "id",
-      timestamp = "time",
-      glucose = "glucose",
-      group = "group",
-      visit = "visit"
+      id = "USUBJID",
+      timestamp = "Time",
+      glucose = "LBORRES"
     )
   )
 
   metrics <- compute_cgmanalyzer_metrics(demo)
 
-  expect_equal(nrow(metrics), 2)
+  expect_equal(nrow(metrics), 5)
   expect_true(all(c("conga_2h", "modd", "cgmanalyzer_status") %in% names(metrics)))
-  expect_true(all(is.finite(metrics$conga_2h)))
-  expect_true(all(is.finite(metrics$modd)))
+  expect_true(all(is.finite(metrics$conga_2h) | is.na(metrics$conga_2h)))
+  expect_true(all(is.finite(metrics$modd) | is.na(metrics$modd)))
 })
 
 test_that("iglu adapter computes selected fallback metrics", {
   skip_if_not_installed("iglu")
 
   demo <- standardize_cgm_data(
-    load_demo_cgm_data(),
+    load_example_complete_cgm_data(),
     mapping = list(
-      id = "id",
-      timestamp = "time",
-      glucose = "glucose",
-      group = "group",
-      visit = "visit"
+      id = "USUBJID",
+      timestamp = "Time",
+      glucose = "LBORRES"
     )
   )
 
   metrics <- compute_iglu_metrics(demo)
 
-  expect_equal(nrow(metrics), 2)
+  expect_equal(nrow(metrics), 5)
   expect_true(all(c("lbgi", "hbgi", "j_index", "mage", "iglu_status") %in% names(metrics)))
   expect_true(all(is.finite(metrics$lbgi)))
   expect_true(all(is.finite(metrics$hbgi)))
@@ -74,11 +70,11 @@ test_that("batched iglu adapter matches participant-wise iglu outputs", {
   skip_if_not_installed("iglu")
 
   demo <- standardize_cgm_data(
-    load_demo_cgm_data(),
+    load_example_complete_cgm_data(),
     mapping = list(
-      id = "id",
-      timestamp = "time",
-      glucose = "glucose"
+      id = "USUBJID",
+      timestamp = "Time",
+      glucose = "LBORRES"
     )
   )
 

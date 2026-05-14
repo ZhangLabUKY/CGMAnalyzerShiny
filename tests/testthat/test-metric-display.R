@@ -1,7 +1,7 @@
 test_that("prepare_metrics_display hides internal adapter columns", {
   demo <- standardize_cgm_data(
-    load_demo_cgm_data(),
-    mapping = list(id = "id", timestamp = "time", glucose = "glucose", group = "group", visit = "visit")
+    load_example_complete_cgm_data(),
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
   )
   metrics <- compute_core_metrics(demo)
   display <- prepare_metrics_display(metrics)
@@ -13,33 +13,34 @@ test_that("prepare_metrics_display hides internal adapter columns", {
 
 test_that("prepare_metrics_display returns readable long-format rows", {
   demo <- standardize_cgm_data(
-    load_demo_cgm_data(),
-    mapping = list(id = "id", timestamp = "time", glucose = "glucose", group = "group", visit = "visit")
+    load_example_complete_cgm_data(),
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
   )
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
-  expect_true(all(c("Subject ID", "Group", "Visit", "Category", "Metric", "Value", "Units") %in% names(display)))
+  expect_true(all(c("Subject ID", "Group", "Visit", "Category", "Metric", "Definition", "Value", "Units") %in% names(display)))
   expect_true(nrow(display) > 20)
   expect_true(all(c("Data Coverage", "Central Tendency", "Variability", "Time in Range", "Detailed Range Bands", "Risk", "Excursions") %in% display$Category))
   expect_true("Mean glucose" %in% display$Metric)
   expect_true("Coefficient of variation" %in% display$Metric)
+  expect_false(any(is.na(display$Definition) | !nzchar(display$Definition)))
 })
 
 test_that("metric display avoids wide debug columns on demo metrics", {
   demo <- standardize_cgm_data(
-    load_demo_cgm_data(),
-    mapping = list(id = "id", timestamp = "time", glucose = "glucose", group = "group", visit = "visit")
+    load_example_complete_cgm_data(),
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
   )
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
-  expect_lte(ncol(display), 7)
-  expect_equal(sort(unique(display[["Subject ID"]])), c("CGM001", "CGM002"))
+  expect_lte(ncol(display), 8)
+  expect_equal(sort(unique(display[["Subject ID"]])), sort(c("11", "18", "80", "115", "217")))
 })
 
 test_that("core range metrics and detailed bands use separate categories", {
   demo <- standardize_cgm_data(
-    load_demo_cgm_data(),
-    mapping = list(id = "id", timestamp = "time", glucose = "glucose", group = "group", visit = "visit")
+    load_example_complete_cgm_data(),
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
   )
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
@@ -79,10 +80,77 @@ test_that("range metric labels include threshold context", {
   expect_true(any(grepl(">250", labels, fixed = TRUE)))
 })
 
+test_that("range metric labels and definitions use current thresholds", {
+  thresholds <- list(
+    tir_lower = 80,
+    tir_upper = 160,
+    tbr_level2 = 55,
+    tar_level2 = 240
+  )
+  catalog <- metric_display_catalog(thresholds = thresholds)
+  demo <- standardize_cgm_data(
+    load_example_complete_cgm_data(),
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
+  )
+  display <- prepare_metrics_display(compute_base_core_metrics(demo, thresholds = thresholds), thresholds = thresholds)
+
+  expect_true("Time in range (80-160 mg/dL)" %in% catalog$metric)
+  expect_true("Time below range (<80 mg/dL)" %in% display$Metric)
+  expect_true("Level 1 above range (161-240 mg/dL)" %in% display$Metric)
+  expect_true(any(grepl("between 80 and 160 mg/dL", display$Definition, fixed = TRUE)))
+  expect_equal(
+    key_metric_names(thresholds)[3:5],
+    c(
+      "Time in range (80-160 mg/dL)",
+      "Time below range (<80 mg/dL)",
+      "Time above range (>160 mg/dL)"
+    )
+  )
+})
+
+test_that("metric display is ordered by category, subject, and catalog order", {
+  data <- data.frame(
+    id = rep(c("B", "A"), each = 4),
+    timestamp = rep(parse_cgm_timestamp(c(
+      "2026-05-05 08:00:00",
+      "2026-05-05 08:05:00",
+      "2026-05-05 08:10:00",
+      "2026-05-05 08:15:00"
+    )), times = 2),
+    glucose = c(60, 100, 150, 220, 70, 110, 140, 180),
+    id_source = subject_id_source_mapped(),
+    stringsAsFactors = FALSE
+  )
+  display <- prepare_metrics_display(compute_base_core_metrics(data))
+
+  expect_equal(unique(display$Category)[1:4], metric_category_order()[1:4])
+  coverage <- display[display$Category == "Data Coverage", , drop = FALSE]
+  expect_equal(coverage[["Subject ID"]], c("A", "B"))
+})
+
+test_that("metrics table options group by Category", {
+  display <- empty_metrics_display()
+  options <- metrics_table_options(display)
+
+  expect_true("rowGroup" %in% names(options))
+  expect_equal(options$rowGroup$dataSrc, match("Category", names(display)) - 1L)
+  expect_equal(options$columnDefs[[1]]$targets, match("Category", names(display)) - 1L)
+  expect_false(options$columnDefs[[1]]$visible)
+  expect_equal(options$pageLength, 15)
+})
+
+test_that("optional metric note is user-facing and hides internal wording", {
+  note <- optional_metric_note_text("failed")
+
+  expect_true(nzchar(note))
+  expect_equal(optional_metric_note_text("complete"), "")
+  expect_false(grepl("CGManalyzer|iglu|engine|adapter|package", note, ignore.case = TRUE))
+})
+
 test_that("category filter can be excluded for stable summary cards", {
   demo <- standardize_cgm_data(
-    load_demo_cgm_data(),
-    mapping = list(id = "id", timestamp = "time", glucose = "glucose", group = "group", visit = "visit")
+    load_example_complete_cgm_data(),
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
   )
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
@@ -95,10 +163,24 @@ test_that("category filter can be excluded for stable summary cards", {
   expect_false("Mean glucose" %in% table_filtered$Metric)
 })
 
+test_that("metric summary cards use shared Label and Value structure", {
+  demo <- standardize_cgm_data(
+    load_example_complete_cgm_data(),
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
+  )
+  display <- prepare_metrics_display(compute_base_core_metrics(demo))
+  cards <- metric_summary_cards(display)
+
+  expect_named(cards, c("Label", "Value"))
+  expect_equal(cards$Label, key_metric_names())
+  expect_true(any(grepl("mg/dL", cards$Value, fixed = TRUE)))
+  expect_true(any(grepl("%", cards$Value, fixed = TRUE)))
+})
+
 test_that("All filter sentinel returns all metric display rows", {
   demo <- standardize_cgm_data(
-    load_demo_cgm_data(),
-    mapping = list(id = "id", timestamp = "time", glucose = "glucose", group = "group", visit = "visit")
+    load_example_complete_cgm_data(),
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
   )
   display <- prepare_metrics_display(compute_core_metrics(demo))
 

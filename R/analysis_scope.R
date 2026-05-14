@@ -38,6 +38,7 @@ normalize_analysis_date_range <- function(date_range, data = NULL) {
 #' @param date_range Length-two vector or list with start and end dates.
 #'
 #' @return Filtered standardized CGM data.
+#' @noRd
 filter_analysis_date_range <- function(data, date_range = NULL) {
   if (is.null(date_range) || !nrow(data) || !"timestamp" %in% names(data)) {
     return(data)
@@ -64,4 +65,18 @@ filter_analysis_date_range <- function(data, date_range = NULL) {
 analysis_date_range_signature <- function(settings) {
   range <- settings$analysis_date_range %||% c(start = NA_character_, end = NA_character_)
   c(start = as.character(range[[1L]]), end = as.character(range[[2L]]))
+}
+
+imputation_settings_signature <- function(settings) {
+  c(
+    method = as.character(settings$imputation_method %||% "none"),
+    model = as.character(settings$imputation_model %||% "mice_only"),
+    seed = as.character(settings$imputation_seed %||% 42),
+    available = as.character(isTRUE(settings$imputation_available %||% FALSE)),
+    backend = as.character(settings$imputation_backend %||% "mice"),
+    interval_minutes = as.character(settings$imputation_interval_minutes %||% 5L),
+    arima_threshold = as.character(settings$imputation_arima_threshold %||% 0.05),
+    arima_min_history = as.character(settings$imputation_arima_min_history %||% 20L),
+    xgb_rounds = as.character(settings$imputation_xgb_rounds %||% 300L)
+  )
 }

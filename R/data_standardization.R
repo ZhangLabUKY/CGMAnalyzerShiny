@@ -7,7 +7,9 @@ optional_cgm_columns <- function() {
 }
 
 clean_mapping_value <- function(x) {
-  if (is.null(x) || length(x) == 0L || is.na(x[[1L]]) || identical(x[[1L]], "")) {
+  if (
+    is.null(x) || length(x) == 0L || is.na(x[[1L]]) || identical(x[[1L]], "")
+  ) {
     return(NA_character_)
   }
   as.character(x[[1L]])
@@ -36,17 +38,29 @@ validate_mapping <- function(data, mapping, upload_mode = "single_file") {
   }
   column_mapping_names <- c(required_cgm_columns(), optional_cgm_columns())
   column_mapping <- stats::setNames(
-    vapply(column_mapping_names, function(name) clean_mapping_value(mapping[[name]]), character(1)),
+    vapply(
+      column_mapping_names,
+      function(name) clean_mapping_value(mapping[[name]]),
+      character(1)
+    ),
     column_mapping_names
   )
   missing_required <- required_cgm_columns()[is.na(column_mapping[required_cgm_columns()])]
   if (length(missing_required) > 0L) {
-    stop("Missing required mapping: ", paste(missing_required, collapse = ", "), call. = FALSE)
+    stop(
+      "Missing required mapping: ",
+      paste(missing_required, collapse = ", "),
+      call. = FALSE
+    )
   }
 
   unknown <- setdiff(column_mapping[!is.na(column_mapping)], names(data))
   if (length(unknown) > 0L) {
-    stop("Mapped columns not found in data: ", paste(unknown, collapse = ", "), call. = FALSE)
+    stop(
+      "Mapped columns not found in data: ",
+      paste(unknown, collapse = ", "),
+      call. = FALSE
+    )
   }
 
   mapping
@@ -60,7 +74,7 @@ validate_mapping <- function(data, mapping, upload_mode = "single_file") {
 #'   day-first for CGM device exports.
 #'
 #' @return POSIXct vector.
-#' @export
+#' @noRd
 parse_cgm_timestamp <- function(x, tz = "UTC", date_order = "dmy") {
   if (inherits(x, "POSIXct")) {
     return(x)
@@ -80,13 +94,19 @@ parse_cgm_timestamp <- function(x, tz = "UTC", date_order = "dmy") {
   x_chr[x_chr == ""] <- NA_character_
   date_order <- clean_timestamp_date_order(date_order)
 
-  parsed <- rep(as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz), length(x_chr))
+  parsed <- rep(
+    as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz),
+    length(x_chr)
+  )
   numeric_idx <- !is.na(x_chr) & grepl("^\\d+(\\.\\d+)?$", x_chr)
   numeric_values <- suppressWarnings(as.numeric(x_chr[numeric_idx]))
   excel_idx <- numeric_idx
-  excel_idx[numeric_idx] <- !is.na(numeric_values) & numeric_values > 20000 & numeric_values < 80000
+  excel_idx[numeric_idx] <- !is.na(numeric_values) &
+    numeric_values > 20000 &
+    numeric_values < 80000
   if (any(excel_idx)) {
-    parsed[excel_idx] <- as.POSIXct((as.numeric(x_chr[excel_idx]) - 25569) * 86400,
+    parsed[excel_idx] <- as.POSIXct(
+      (as.numeric(x_chr[excel_idx]) - 25569) * 86400,
       origin = "1970-01-01",
       tz = tz
     )
@@ -95,6 +115,8 @@ parse_cgm_timestamp <- function(x, tz = "UTC", date_order = "dmy") {
   year_first_formats <- c(
     "%Y-%m-%d %H:%M:%S",
     "%Y-%m-%d %H:%M",
+    "%Y:%m:%d:%H:%M:%S",
+    "%Y:%m:%d:%H:%M",
     "%Y-%m-%d %I:%M:%S %p",
     "%Y-%m-%d %I:%M %p",
     "%Y/%m/%d %H:%M:%S",
@@ -110,7 +132,13 @@ parse_cgm_timestamp <- function(x, tz = "UTC", date_order = "dmy") {
 
   day_month_formats <- timestamp_date_order_formats(date_order)
   parseable_non_year_first <- !is.na(x_chr) & is.na(parsed)
-  parsed <- parse_with_formats(x_chr, parsed, day_month_formats, tz = tz, idx = parseable_non_year_first)
+  parsed <- parse_with_formats(
+    x_chr,
+    parsed,
+    day_month_formats,
+    tz = tz,
+    idx = parseable_non_year_first
+  )
 
   parsed
 }
@@ -132,20 +160,32 @@ clean_timestamp_date_order <- function(date_order) {
 
 timestamp_date_order_formats <- function(date_order = NULL) {
   mdy <- c(
-    "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p",
-    "%m-%d-%Y %I:%M:%S %p", "%m-%d-%Y %I:%M %p",
-    "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M",
-    "%m/%d/%y %H:%M:%S", "%m/%d/%y %H:%M",
-    "%m-%d-%Y %H:%M:%S", "%m-%d-%Y %H:%M",
-    "%m-%d-%y %H:%M:%S", "%m-%d-%y %H:%M"
+    "%m/%d/%Y %I:%M:%S %p",
+    "%m/%d/%Y %I:%M %p",
+    "%m-%d-%Y %I:%M:%S %p",
+    "%m-%d-%Y %I:%M %p",
+    "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y %H:%M",
+    "%m/%d/%y %H:%M:%S",
+    "%m/%d/%y %H:%M",
+    "%m-%d-%Y %H:%M:%S",
+    "%m-%d-%Y %H:%M",
+    "%m-%d-%y %H:%M:%S",
+    "%m-%d-%y %H:%M"
   )
   dmy <- c(
-    "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %I:%M %p",
-    "%d-%m-%Y %I:%M:%S %p", "%d-%m-%Y %I:%M %p",
-    "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M",
-    "%d/%m/%y %H:%M:%S", "%d/%m/%y %H:%M",
-    "%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M",
-    "%d-%m-%y %H:%M:%S", "%d-%m-%y %H:%M"
+    "%d/%m/%Y %I:%M:%S %p",
+    "%d/%m/%Y %I:%M %p",
+    "%d-%m-%Y %I:%M:%S %p",
+    "%d-%m-%Y %I:%M %p",
+    "%d/%m/%Y %H:%M:%S",
+    "%d/%m/%Y %H:%M",
+    "%d/%m/%y %H:%M:%S",
+    "%d/%m/%y %H:%M",
+    "%d-%m-%Y %H:%M:%S",
+    "%d-%m-%Y %H:%M",
+    "%d-%m-%y %H:%M:%S",
+    "%d-%m-%y %H:%M"
   )
   if (identical(date_order, "dmy")) {
     c(dmy, mdy)
@@ -179,29 +219,49 @@ detect_ambiguous_timestamps <- function(x) {
   idx <- !is.na(x_chr) &
     grepl("^\\d{1,2}[-/]\\d{1,2}[-/]\\d{2,4}(\\D|$)", x_chr) &
     !grepl("^\\d{4}[-/]", x_chr)
-  parts <- regmatches(x_chr[idx], regexec("^(\\d{1,2})[-/](\\d{1,2})[-/](\\d{2,4})", x_chr[idx]))
-  out[which(idx)] <- vapply(parts, function(part) {
-    if (length(part) < 4L) {
-      return(FALSE)
-    }
-    first <- suppressWarnings(as.integer(part[[2L]]))
-    second <- suppressWarnings(as.integer(part[[3L]]))
-    !is.na(first) && !is.na(second) && first <= 12L && second <= 12L && first != second
-  }, logical(1))
+  parts <- regmatches(
+    x_chr[idx],
+    regexec("^(\\d{1,2})[-/](\\d{1,2})[-/](\\d{2,4})", x_chr[idx])
+  )
+  out[which(idx)] <- vapply(
+    parts,
+    function(part) {
+      if (length(part) < 4L) {
+        return(FALSE)
+      }
+      first <- suppressWarnings(as.integer(part[[2L]]))
+      second <- suppressWarnings(as.integer(part[[3L]]))
+      !is.na(first) &&
+        !is.na(second) &&
+        first <= 12L &&
+        second <= 12L &&
+        first != second
+    },
+    logical(1)
+  )
   out
 }
 
 timestamp_parse_summary <- function(x, tz = "UTC", date_order = "dmy") {
   parsed <- parse_cgm_timestamp(x, tz = tz, date_order = date_order)
-  non_missing <- !is.na(trimws(as.character(x))) & nzchar(trimws(as.character(x)))
+  non_missing <- !is.na(trimws(as.character(x))) &
+    nzchar(trimws(as.character(x)))
   data.frame(
     rows = length(x),
     non_missing_timestamps = sum(non_missing),
     parsed_timestamps = sum(!is.na(parsed)),
     failed_timestamps = sum(non_missing & is.na(parsed)),
     ambiguous_timestamps = sum(detect_ambiguous_timestamps(x)),
-    first_timestamp = if (any(!is.na(parsed))) min(parsed, na.rm = TRUE) else as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz),
-    last_timestamp = if (any(!is.na(parsed))) max(parsed, na.rm = TRUE) else as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz),
+    first_timestamp = if (any(!is.na(parsed))) {
+      min(parsed, na.rm = TRUE)
+    } else {
+      as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz)
+    },
+    last_timestamp = if (any(!is.na(parsed))) {
+      max(parsed, na.rm = TRUE)
+    } else {
+      as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz)
+    },
     stringsAsFactors = FALSE
   )
 }
@@ -231,7 +291,8 @@ prepare_cgm_data_export <- function(data, tz = "UTC") {
 }
 
 validate_parsed_timestamps <- function(raw_timestamp, parsed_timestamp) {
-  non_missing <- !is.na(trimws(as.character(raw_timestamp))) & nzchar(trimws(as.character(raw_timestamp)))
+  non_missing <- !is.na(trimws(as.character(raw_timestamp))) &
+    nzchar(trimws(as.character(raw_timestamp)))
   failed <- non_missing & is.na(parsed_timestamp)
   if (any(failed)) {
     examples <- unique(as.character(raw_timestamp[failed]))
@@ -268,7 +329,7 @@ convert_glucose_to_mg_dl <- function(glucose, units) {
 #' @param timestamp_date_order Date order for non-year-first dates.
 #'
 #' @return Standardized CGM data frame.
-#' @export
+#' @noRd
 standardize_cgm_data <- function(
   data,
   mapping,
@@ -281,14 +342,21 @@ standardize_cgm_data <- function(
   data <- as.data.frame(data, stringsAsFactors = FALSE)
   id_source <- determine_id_source(data, mapping, upload_mode = upload_mode)
   mapping <- validate_mapping(data, mapping, upload_mode = upload_mode)
-  timestamp <- parse_cgm_timestamp(data[[mapping$timestamp]], tz = tz, date_order = timestamp_date_order)
+  timestamp <- parse_cgm_timestamp(
+    data[[mapping$timestamp]],
+    tz = tz,
+    date_order = timestamp_date_order
+  )
   validate_parsed_timestamps(data[[mapping$timestamp]], timestamp)
 
   out <- data.frame(
     id = as.character(data[[mapping$id]]),
     id_source = id_source,
     timestamp = timestamp,
-    glucose = convert_glucose_to_mg_dl(coerce_glucose(data[[mapping$glucose]]), units),
+    glucose = convert_glucose_to_mg_dl(
+      coerce_glucose(data[[mapping$glucose]]),
+      units
+    ),
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
@@ -317,7 +385,11 @@ standardize_cgm_data <- function(
 read_cgm_file <- function(datapath, filename) {
   ext <- tolower(tools::file_ext(filename))
   if (ext %in% c("csv", "txt")) {
-    data <- data.table::fread(datapath, data.table = FALSE, showProgress = FALSE)
+    data <- data.table::fread(
+      datapath,
+      data.table = FALSE,
+      showProgress = FALSE
+    )
   } else if (ext %in% c("xlsx", "xls")) {
     if (!requireNamespace("readxl", quietly = TRUE)) {
       stop("Package 'readxl' is required to read Excel files.", call. = FALSE)
@@ -343,12 +415,15 @@ combine_uploaded_files <- function(datapaths, filenames) {
   combined
 }
 
-#' Load bundled demo CGM data
+#' Load bundled complete example CGM data
 #'
-#' @return A data frame with demo CGM readings.
-#' @export
-load_demo_cgm_data <- function() {
-  load_extdata_csv("demo_cgm.csv", "Demo CGM data file was not found.")
+#' @return A data frame with complete example CGM readings.
+#' @noRd
+load_example_complete_cgm_data <- function() {
+  load_extdata_csv(
+    "cgm_example_complete.csv",
+    "Complete example CGM data file was not found."
+  )
 }
 
 load_extdata_csv <- function(filename, missing_message) {
@@ -382,10 +457,24 @@ load_extdata_csv <- function(filename, missing_message) {
   data
 }
 
-#' Load bundled missingness demo CGM data
+#' Load bundled 5 percent missing example CGM data
 #'
-#' @return A data frame with intentional gaps and missing glucose values.
-#' @export
-load_missingness_demo_cgm_data <- function() {
-  load_extdata_csv("demo_cgm_missingness.csv", "Missingness demo CGM data file was not found.")
+#' @return A data frame with 5 percent missing glucose example CGM readings.
+#' @noRd
+load_example_missing_5pct_cgm_data <- function() {
+  load_extdata_csv(
+    "CGMExmplDat5Pct.csv",
+    "5 percent missing example CGM data file was not found."
+  )
+}
+
+#' Load bundled 10 percent missing example CGM data
+#'
+#' @return A data frame with 10 percent missing glucose example CGM readings.
+#' @noRd
+load_example_missing_10pct_cgm_data <- function() {
+  load_extdata_csv(
+    "CGMExmplDat10Pct.csv",
+    "10 percent missing example CGM data file was not found."
+  )
 }

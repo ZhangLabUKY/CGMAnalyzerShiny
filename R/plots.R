@@ -5,7 +5,7 @@
 #' @param participant_id Optional participant ID filter.
 #'
 #' @return A ggplot object.
-#' @export
+#' @noRd
 create_trace_plot <- function(
   data,
   thresholds = default_cgm_thresholds(),
@@ -18,7 +18,7 @@ create_trace_plot <- function(
   data <- data[is_finite_cgm_timestamp(data$timestamp) & !is.na(data$glucose), , drop = FALSE]
   data <- prepare_plot_display_data(data, max_points_per_participant = max_points_per_participant)
   if (!nrow(data)) {
-    return(empty_plot("No valid timestamps available"))
+    return(empty_plot(plot_empty_message("trace")))
   }
 
   ggplot2::ggplot(data, ggplot2::aes(x = timestamp, y = glucose, color = id, group = id)) +
@@ -181,10 +181,177 @@ is_finite_cgm_timestamp <- function(timestamp) {
   !is.na(timestamp) & is.finite(as.numeric(timestamp))
 }
 
+plot_empty_message <- function(plot_type = "trace") {
+  switch(
+    plot_type %||% "trace",
+    trace = "No glucose readings are available for the selected plot filters.",
+    daily_overlay = "No daily overlay data are available for the selected day/filter choices.",
+    agp = "Not enough glucose readings are available to build an AGP summary.",
+    "No data available"
+  )
+}
+
 empty_plot <- function(message = "No data available") {
   ggplot2::ggplot() +
     ggplot2::annotate("text", x = 0, y = 0, label = message) +
     ggplot2::theme_void()
+}
+
+plot_filtered_data <- function(
+  data,
+  plot_type = "trace",
+  participant = "",
+  group = "",
+  visit = "",
+  day = ""
+) {
+  day <- if (identical(plot_type, "daily_overlay")) normalize_plot_days(day) else all_filter_value()
+  filtered <- filter_plot_data(
+    data,
+    participant = participant,
+    group = group,
+    visit = visit,
+    day = day
+  )
+  filtered[is_finite_cgm_timestamp(filtered$timestamp), , drop = FALSE]
+}
+
+daily_overlay_date_legend_limit <- function() {
+  14L
+}
+
+daily_overlay_legend_visible <- function(day_count, date_legend_limit = daily_overlay_date_legend_limit()) {
+  is.finite(day_count) && day_count > 0L && day_count <= date_legend_limit
+}
+
+daily_overlay_day_mode <- function(day, day_count = NA_integer_) {
+  day <- normalize_plot_days(day)
+  if (!is.na(day_count) && day_count == 0L) {
+    return("No days")
+  }
+  if (identical(day, all_filter_value())) {
+    "All days"
+  } else {
+    "Selected days"
+  }
+}
+
+daily_overlay_summary_rows <- function(
+  plot_data,
+  day = "",
+  date_legend_limit = daily_overlay_date_legend_limit()
+) {
+  day_count <- length(unique(as.Date(plot_data$timestamp[is_finite_cgm_timestamp(plot_data$timestamp)])))
+  legend <- if (daily_overlay_legend_visible(day_count, date_legend_limit)) {
+    "Shown"
+  } else if (day_count > date_legend_limit) {
+    "Hidden for readability"
+  } else {
+    "Not available"
+  }
+  data.frame(
+    Label = c("Day selection", "Days shown", "Date legend"),
+    Value = c(
+      daily_overlay_day_mode(day, day_count = day_count),
+      format_count(day_count),
+      legend
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+
+daily_overlay_legend_note <- function(
+  plot_data,
+  date_legend_limit = daily_overlay_date_legend_limit()
+) {
+  day_count <- length(unique(as.Date(plot_data$timestamp[is_finite_cgm_timestamp(plot_data$timestamp)])))
+  if (day_count > date_legend_limit) {
+    "Many days are shown, so the date legend is hidden for readability. Select fewer days to show the legend."
+  } else {
+    ""
+  }
+}
+
+sanitize_plot_filename_part <- function(x) {
+  x <- x %||% ""
+  x <- paste(as.character(x), collapse = "_")
+  x <- trimws(tolower(x))
+  x <- gsub("[^a-z0-9_-]+", "-", x)
+  x <- gsub("-+", "-", x)
+  x <- gsub("^-|-$", "", x)
+  if (!nzchar(x)) "all" else x
+}
+
+plot_type_filename_label <- function(plot_type = "trace") {
+  switch(
+    plot_type %||% "trace",
+    daily_overlay = "daily-overlay",
+    agp = "agp-summary",
+    trace = "trace",
+    sanitize_plot_filename_part(plot_type)
+  )
+}
+
+plot_day_filename_label <- function(day = "") {
+  day <- normalize_plot_days(day)
+  if (identical(day, all_filter_value())) {
+    return("all-days")
+  }
+  day <- sort(unique(as.character(day)))
+  if (length(day) == 1L) {
+    return(paste0("day-", sanitize_plot_filename_part(day)))
+  }
+  paste0("days-", sanitize_plot_filename_part(paste0(day[[1L]], "_to_", day[[length(day)]])))
+}
+
+plot_subject_filename_label <- function(participant = "") {
+  participant <- normalize_filter_value(participant)
+  if (nzchar(participant)) {
+    paste0("subject-", sanitize_plot_filename_part(participant))
+  } else {
+    "all-subjects"
+  }
+}
+
+plot_optional_filter_filename_label <- function(prefix, value = "") {
+  value <- normalize_filter_value(value)
+  if (nzchar(value)) {
+    paste0(prefix, "-", sanitize_plot_filename_part(value))
+  } else {
+    character()
+  }
+}
+
+plot_download_filename <- function(
+  data,
+  plot_type = "trace",
+  participant = "",
+  group = "",
+  visit = "",
+  day = ""
+) {
+  filtered <- plot_filtered_data(
+    data,
+    plot_type = plot_type,
+    participant = participant,
+    group = group,
+    visit = visit,
+    day = day
+  )
+  date_span <- if (nrow(filtered)) {
+    paste0("dates-", sanitize_plot_filename_part(format_date_span(filtered$timestamp)))
+  } else {
+    "dates-none"
+  }
+  parts <- c(
+    "cgm",
+    plot_type_filename_label(plot_type),
+    plot_subject_filename_label(participant),
+    plot_optional_filter_filename_label("group", group),
+    plot_optional_filter_filename_label("visit", visit),
+    if (identical(plot_type, "daily_overlay")) plot_day_filename_label(day) else date_span
+  )
+  paste0(paste(parts[nzchar(parts)], collapse = "_"), ".png")
 }
 
 #' Prepare CGM data for time-of-day plots
@@ -196,7 +363,7 @@ empty_plot <- function(message = "No data available") {
 #' @param day Date filter as `YYYY-MM-DD`.
 #'
 #' @return A data frame with time-of-day plotting columns.
-#' @export
+#' @noRd
 prepare_time_of_day_plot_data <- function(
   data,
   participant = "",
@@ -248,7 +415,7 @@ target_range_label <- function(thresholds) {
 #' @param day Date filter as `YYYY-MM-DD`.
 #'
 #' @return A ggplot object.
-#' @export
+#' @noRd
 create_daily_overlay_plot <- function(
   data,
   thresholds = default_cgm_thresholds(),
@@ -257,7 +424,7 @@ create_daily_overlay_plot <- function(
   visit = "",
   day = "",
   max_points_per_participant = Inf,
-  date_legend_limit = 14L
+  date_legend_limit = daily_overlay_date_legend_limit()
 ) {
   day <- normalize_plot_days(day)
   plot_data <- prepare_time_of_day_plot_data(
@@ -269,10 +436,10 @@ create_daily_overlay_plot <- function(
     max_points_per_participant = max_points_per_participant
   )
   if (!nrow(plot_data)) {
-    return(empty_plot())
+    return(empty_plot(plot_empty_message("daily_overlay")))
   }
 
-  show_date_legend <- length(unique(plot_data$date)) <= date_legend_limit
+  show_date_legend <- daily_overlay_legend_visible(length(unique(plot_data$date)), date_legend_limit)
   plot <- ggplot2::ggplot(
     plot_data,
     ggplot2::aes(x = time_minutes, y = glucose, color = date, group = plot_group)
@@ -339,7 +506,7 @@ prepare_agp_summary_data <- function(
 #' @param bin_minutes Time-of-day bin width in minutes.
 #'
 #' @return A ggplot object.
-#' @export
+#' @noRd
 create_agp_summary_plot <- function(
   data,
   thresholds = default_cgm_thresholds(),
@@ -356,7 +523,7 @@ create_agp_summary_plot <- function(
     bin_minutes = bin_minutes
   )
   if (!nrow(agp)) {
-    return(empty_plot())
+    return(empty_plot(plot_empty_message("agp")))
   }
 
   target_label <- target_range_label(thresholds)
@@ -438,7 +605,7 @@ tir_long_data <- function(metrics) {
 #' @param metrics Metric summary data frame from `compute_core_metrics()`.
 #'
 #' @return A ggplot object.
-#' @export
+#' @noRd
 create_tir_plot <- function(metrics) {
   plot_data <- tir_long_data(metrics)
   ggplot2::ggplot(plot_data, ggplot2::aes(x = id, y = percent, fill = range)) +

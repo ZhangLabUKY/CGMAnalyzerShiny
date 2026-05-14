@@ -43,17 +43,11 @@ app_server <- function(input, output, session) {
     upload <- tryCatch(uploaded(), shiny.silent.error = function(error) NULL, error = function(error) NULL)
     map <- tryCatch(mapping(), shiny.silent.error = function(error) NULL, error = function(error) NULL)
     standardized_result <- safe_standardized()
-    status <- data_setup_status(
+    data_validation_panel_ui(
       upload = upload,
       mapping = map,
-      standardized_data = standardized_result$data,
       standardization_error = standardized_result$error,
       settings = safe_settings()
-    )
-
-    shiny::tagList(
-      shiny::h4("Setup Status"),
-      summary_card_ui(data.frame(Label = status$Step, Value = paste(status$Status, "-", status$Detail), stringsAsFactors = FALSE), compact = TRUE)
     )
   })
 
@@ -78,7 +72,7 @@ app_server <- function(input, output, session) {
     shiny::div(
       class = "alert alert-light border",
       style = "margin-top: 42px;",
-      "Upload CGM files or load demo data to continue."
+      "Upload CGM files or load example data to continue."
     )
   })
 
@@ -122,19 +116,28 @@ app_server <- function(input, output, session) {
       return(data)
     }
 
-    result <- run_cgmissingdata_imputation(
-      data,
-      model = current_settings$imputation_model,
-      seed = current_settings$imputation_seed
+    tryCatch(
+      {
+        result <- run_cgmissingdata_imputation(
+          data,
+          seed = current_settings$imputation_seed,
+          backend = current_settings$imputation_backend %||% "mice",
+          interval_minutes = current_settings$imputation_interval_minutes %||% 5L,
+          arima_threshold = current_settings$imputation_arima_threshold %||% 0.05,
+          arima_min_history = current_settings$imputation_arima_min_history %||% 20L,
+          xgb_rounds = current_settings$imputation_xgb_rounds %||% 300L
+        )
+        apply_imputed_glucose(data, result)
+      },
+      error = function(error) {
+        attr(data, "imputation_error") <- conditionMessage(error)
+        data
+      }
     )
-    apply_imputed_glucose(data, result, model = current_settings$imputation_model)
   }),
   cgm_data_signature(analysis_input()),
   analysis_date_range_signature(settings()),
-  settings()$imputation_method,
-  settings()$imputation_model,
-  settings()$imputation_seed,
-  settings()$imputation_available
+  imputation_settings_signature(settings())
   )
 
   qc_summary <- qc_module_server("qc", analysis_input, analysis_data, settings, active_tab)

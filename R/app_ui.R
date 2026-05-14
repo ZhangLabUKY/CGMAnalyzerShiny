@@ -3,6 +3,14 @@ app_ui <- function() {
     title = "CGMAnalyzerShiny",
     id = "active_tab",
     theme = bslib::bs_theme(version = 5, bootswatch = "flatly"),
+    # header = shiny::div(
+    #   style = "position: absolute; top: 8px; right: 15px; z-index: 1050;",
+    #   shinyscreenshot::screenshotButton(
+    #     label = "Capture",
+    #     filename = "cgm-analyzer"
+    #     # The 'id' argument has been completely removed
+    #   )
+    # ),
     shiny::tabPanel(
       "Data",
       value = "data",
@@ -27,6 +35,11 @@ app_ui <- function() {
       metrics_module_ui("metrics")
     ),
     shiny::tabPanel(
+      "Complexity",
+      value = "complexity",
+      complexity_module_ui("complexity")
+    ),
+    shiny::tabPanel(
       "Plots",
       value = "plots",
       plots_module_ui("plots")
@@ -35,11 +48,6 @@ app_ui <- function() {
       "Statistics",
       value = "statistics",
       stats_module_ui("stats")
-    ),
-    shiny::tabPanel(
-      "Complexity",
-      value = "complexity",
-      complexity_module_ui("complexity")
     ),
     shiny::tabPanel(
       "Export",

@@ -42,7 +42,7 @@ insufficient_stat_result <- function(metric, grouping, test_type, groups = NA_ch
 #' @param test_type Either `welch_t` or `wilcoxon`.
 #'
 #' @return One-row data frame with test result or an insufficiency note.
-#' @export
+#' @noRd
 run_metric_stat_test <- function(metrics, metric, grouping = "group", test_type = "welch_t") {
   if (!metric %in% names(metrics)) {
     stop("Selected metric is not available.", call. = FALSE)

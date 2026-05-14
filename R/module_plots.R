@@ -1,3 +1,34 @@
+plot_filter_layout_order <- function(plot_type = "trace") {
+  if (identical(plot_type, "daily_overlay")) {
+    c("day_filter", "subject_filter", "group_filter")
+  } else {
+    c("subject_filter", "group_filter", "visit_filter")
+  }
+}
+
+plot_filter_layout_ui <- function(ns, plot_type = "trace") {
+  filters <- plot_filter_layout_order(plot_type)
+  shiny::tagList(
+    shiny::fluidRow(
+      shiny::column(
+        3,
+        shiny::selectInput(
+          ns("plot_type"),
+          "Plot type",
+          choices = c("Trace" = "trace", "Daily overlay" = "daily_overlay", "AGP summary" = "agp"),
+          selected = plot_type
+        )
+      ),
+      lapply(filters, function(filter_id) {
+        shiny::column(3, shiny::uiOutput(ns(filter_id)))
+      })
+    ),
+    if (identical(plot_type, "daily_overlay")) {
+      shiny::fluidRow(shiny::column(3, shiny::uiOutput(ns("visit_filter"))))
+    }
+  )
+}
+
 plots_module_ui <- function(id) {
   ns <- shiny::NS(id)
   shiny::tagList(
@@ -11,22 +42,7 @@ plots_module_ui <- function(id) {
         )
       )
     ),
-    shiny::fluidRow(
-      shiny::column(
-        3,
-        shiny::selectInput(
-          ns("plot_type"),
-          "Plot type",
-          choices = c("Trace" = "trace", "Daily overlay" = "daily_overlay", "AGP summary" = "agp")
-        )
-      ),
-      shiny::column(3, shiny::uiOutput(ns("day_filter"))),
-      shiny::column(3, shiny::uiOutput(ns("subject_filter"))),
-      shiny::column(3, shiny::uiOutput(ns("group_filter")))
-    ),
-    shiny::fluidRow(
-      shiny::column(3, shiny::uiOutput(ns("visit_filter")))
-    ),
+    shiny::uiOutput(ns("filter_layout")),
     shinycssloaders::withSpinner(shiny::uiOutput(ns("plot_summary")), type = 4),
     shinycssloaders::withSpinner(plotly::plotlyOutput(ns("active_plot"), height = "460px"), type = 4)
   )
@@ -35,6 +51,11 @@ plots_module_ui <- function(id) {
 plots_module_server <- function(id, standardized, metrics, settings, active_tab = NULL) {
   shiny::moduleServer(id, function(input, output, session) {
     day_selection <- shiny::reactiveVal(all_filter_value())
+
+    output$filter_layout <- shiny::renderUI({
+      req_active_tab(active_tab, "plots")
+      plot_filter_layout_ui(session$ns, input$plot_type %||% "trace")
+    })
 
     output$subject_filter <- shiny::renderUI({
       req_active_tab(active_tab, "plots")
@@ -137,16 +158,35 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
 
     output$plot_summary <- shiny::renderUI({
       req_active_tab(active_tab, "plots")
-      summary_card_ui(
-        plot_selection_summary(
-          standardized(),
-          plot_type = input$plot_type %||% "trace",
-          participant = input$participant,
-          group = input$group,
-          visit = input$visit,
-          day = normalized_day()
+      plot_type <- input$plot_type %||% "trace"
+      filtered <- plot_filtered_data(
+        standardized(),
+        plot_type = plot_type,
+        participant = input$participant,
+        group = input$group,
+        visit = input$visit,
+        day = normalized_day()
+      )
+      note <- if (identical(plot_type, "daily_overlay")) {
+        daily_overlay_legend_note(filtered)
+      } else {
+        ""
+      }
+      shiny::tagList(
+        summary_card_ui(
+          plot_selection_summary(
+            standardized(),
+            plot_type = plot_type,
+            participant = input$participant,
+            group = input$group,
+            visit = input$visit,
+            day = normalized_day()
+          ),
+          compact = TRUE
         ),
-        compact = TRUE
+        if (nzchar(note)) {
+          shiny::div(class = "alert alert-info", note)
+        }
       )
     })
 
@@ -202,7 +242,14 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
 
     output$download_plot <- shiny::downloadHandler(
       filename = function() {
-        paste0("cgm_", input$plot_type %||% "plot", ".png")
+        plot_download_filename(
+          standardized(),
+          plot_type = input$plot_type %||% "trace",
+          participant = input$participant,
+          group = input$group,
+          visit = input$visit,
+          day = normalized_day()
+        )
       },
       content = function(file) {
         ggplot2::ggsave(file, plot = active_plot(), width = 10, height = 6, dpi = 300, bg = "white")

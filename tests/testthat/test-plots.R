@@ -45,6 +45,27 @@ test_that("plot helpers return safe empty plots when timestamps are invalid", {
   expect_s3_class(create_missingness_timeline_plot(data), "ggplot")
 })
 
+test_that("plot empty states use plot-specific messages", {
+  data <- data.frame(
+    id = rep("A", 2),
+    timestamp = as.POSIXct(c(NA_real_, NA_real_), origin = "1970-01-01", tz = "UTC"),
+    glucose = c(80, 120),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    visit = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+  plot_label <- function(plot) ggplot2::ggplot_build(plot)$data[[1]]$label[[1]]
+
+  expect_equal(plot_empty_message("trace"), "No glucose readings are available for the selected plot filters.")
+  expect_equal(plot_label(create_trace_plot(data)), plot_empty_message("trace"))
+  expect_equal(plot_label(create_daily_overlay_plot(data)), plot_empty_message("daily_overlay"))
+  expect_equal(plot_label(create_agp_summary_plot(data)), plot_empty_message("agp"))
+})
+
 test_that("time-of-day plot data keeps imputed rows identifiable", {
   data <- data.frame(
     id = rep("A", 4),
@@ -242,6 +263,69 @@ test_that("daily overlay hides very large date legends", {
   expect_equal(few_days$theme$legend.position, "bottom")
   expect_equal(selected_day$theme$legend.position, "bottom")
   expect_equal(selected_days$theme$legend.position, "bottom")
+  expect_false(daily_overlay_legend_visible(15, date_legend_limit = 14))
+  expect_true(daily_overlay_legend_visible(14, date_legend_limit = 14))
+})
+
+test_that("daily overlay summary and notes describe many-day legends", {
+  timestamps <- parse_cgm_timestamp(paste0("2026-05-", sprintf("%02d", 1:15), " 08:00:00"))
+  data <- data.frame(
+    id = rep("A", length(timestamps)),
+    timestamp = timestamps,
+    glucose = seq_along(timestamps) + 100,
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    visit = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+  selected <- plot_filtered_data(data, plot_type = "daily_overlay", day = c("2026-05-02", "2026-05-03"))
+  all_days <- plot_filtered_data(data, plot_type = "daily_overlay", day = all_filter_value())
+  selected_summary <- daily_overlay_summary_rows(selected, day = c("2026-05-02", "2026-05-03"))
+  all_summary <- daily_overlay_summary_rows(all_days, day = all_filter_value())
+
+  expect_equal(selected_summary$Value[selected_summary$Label == "Day selection"], "Selected days")
+  expect_equal(selected_summary$Value[selected_summary$Label == "Days shown"], "2")
+  expect_equal(selected_summary$Value[selected_summary$Label == "Date legend"], "Shown")
+  expect_equal(all_summary$Value[all_summary$Label == "Day selection"], "All days")
+  expect_equal(all_summary$Value[all_summary$Label == "Date legend"], "Hidden for readability")
+  expect_true(grepl("legend is hidden", daily_overlay_legend_note(all_days), fixed = TRUE))
+  expect_equal(daily_overlay_legend_note(selected), "")
+})
+
+test_that("plot download filenames include selected filters safely", {
+  data <- data.frame(
+    id = rep(c("Subject A", "Subject B"), each = 2),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 08:00:00",
+      "2026-05-06 08:00:00",
+      "2026-05-05 08:00:00",
+      "2026-05-07 08:00:00"
+    )),
+    glucose = c(80, 120, 90, 130),
+    group = rep(c("Control Group", "Treatment Group"), each = 2),
+    visit = c("Baseline", "Week 1", "Baseline", "Week 1"),
+    stringsAsFactors = FALSE
+  )
+
+  daily_name <- plot_download_filename(
+    data,
+    plot_type = "daily_overlay",
+    participant = "Subject A",
+    group = "Control Group",
+    visit = "Week 1",
+    day = c("2026-05-06", "2026-05-05")
+  )
+  trace_name <- plot_download_filename(data, plot_type = "trace")
+
+  expect_equal(
+    daily_name,
+    "cgm_daily-overlay_subject-subject-a_group-control-group_visit-week-1_days-2026-05-05_to_2026-05-06.png"
+  )
+  expect_match(trace_name, "^cgm_trace_all-subjects_dates-2026-05-05-to-2026-05-07\\.png$")
+  expect_false(grepl("[^A-Za-z0-9._-]", daily_name))
 })
 
 test_that("group and visit plot filters require usable non-missing values", {
@@ -363,17 +447,48 @@ test_that("plot download button is in the header action area before filters", {
 
   expect_lt(
     regexpr("plots-download_plot", html, fixed = TRUE)[[1L]],
-    regexpr("plots-plot_type", html, fixed = TRUE)[[1L]]
+    regexpr("plots-filter_layout", html, fixed = TRUE)[[1L]]
   )
 })
 
 test_that("plots module uses render-time Subject ID filter container", {
   ui <- plots_module_ui("plots")
   html <- paste(as.character(ui), collapse = "\n")
+  rendered_html <- paste(as.character(plot_filter_layout_ui(shiny::NS("plots"), "trace")), collapse = "\n")
 
-  expect_true(grepl("plots-subject_filter", html, fixed = TRUE))
+  expect_true(grepl("plots-filter_layout", html, fixed = TRUE))
+  expect_false(grepl("plots-plot_type", html, fixed = TRUE))
+  expect_true(grepl("plots-subject_filter", rendered_html, fixed = TRUE))
   expect_false(grepl("id=\"plots-participant\"", html, fixed = TRUE))
   expect_false(grepl(">Participant<", html, fixed = TRUE))
+})
+
+test_that("plot filter layout orders controls by plot type", {
+  trace_html <- paste(as.character(plot_filter_layout_ui(shiny::NS("plots"), "trace")), collapse = "\n")
+  agp_html <- paste(as.character(plot_filter_layout_ui(shiny::NS("plots"), "agp")), collapse = "\n")
+  daily_html <- paste(as.character(plot_filter_layout_ui(shiny::NS("plots"), "daily_overlay")), collapse = "\n")
+  pos <- function(html, id) regexpr(id, html, fixed = TRUE)[[1L]]
+
+  expect_lt(pos(trace_html, "plots-plot_type"), pos(trace_html, "plots-subject_filter"))
+  expect_lt(pos(trace_html, "plots-subject_filter"), pos(trace_html, "plots-group_filter"))
+  expect_lt(pos(trace_html, "plots-group_filter"), pos(trace_html, "plots-visit_filter"))
+  expect_false(grepl("plots-day_filter", trace_html, fixed = TRUE))
+  expect_true(grepl("<option value=\"trace\" selected", trace_html, fixed = TRUE))
+
+  expect_lt(pos(agp_html, "plots-plot_type"), pos(agp_html, "plots-subject_filter"))
+  expect_lt(pos(agp_html, "plots-subject_filter"), pos(agp_html, "plots-group_filter"))
+  expect_lt(pos(agp_html, "plots-group_filter"), pos(agp_html, "plots-visit_filter"))
+  expect_false(grepl("plots-day_filter", agp_html, fixed = TRUE))
+  expect_true(grepl("<option value=\"agp\" selected", agp_html, fixed = TRUE))
+
+  expect_lt(pos(daily_html, "plots-plot_type"), pos(daily_html, "plots-day_filter"))
+  expect_lt(pos(daily_html, "plots-day_filter"), pos(daily_html, "plots-subject_filter"))
+  expect_lt(pos(daily_html, "plots-subject_filter"), pos(daily_html, "plots-group_filter"))
+  expect_gt(pos(daily_html, "plots-visit_filter"), pos(daily_html, "plots-group_filter"))
+  expect_true(grepl("<option value=\"daily_overlay\" selected", daily_html, fixed = TRUE))
+  expect_equal(plot_filter_layout_order("trace"), c("subject_filter", "group_filter", "visit_filter"))
+  expect_equal(plot_filter_layout_order("agp"), c("subject_filter", "group_filter", "visit_filter"))
+  expect_equal(plot_filter_layout_order("daily_overlay"), c("day_filter", "subject_filter", "group_filter"))
 })
 
 test_that("plots module uses normalized day values for active plot cache", {

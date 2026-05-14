@@ -12,15 +12,21 @@ cgmissingdata_function <- function() {
 #' Check whether CGMissingDataR imputation is available
 #'
 #' @return Logical.
-#' @export
+#' @noRd
 cgmissingdata_available <- function() {
   !is.null(cgmissingdata_function())
 }
 
+first_non_missing <- function(x, default = NA) {
+  x <- x[!is.na(x)]
+  if (!length(x)) default else x[[1L]]
+}
+
 prepare_cgmissingdata_input <- function(data) {
+  subject_levels <- unique(as.character(data$id))
   out <- data.frame(
     .row_id = seq_len(nrow(data)),
-    id = as.character(data$id),
+    subject_index = as.integer(factor(as.character(data$id), levels = subject_levels)),
     time = format_cgm_timestamp_iso(data$timestamp, tz = "UTC"),
     glucose = as.numeric(data$glucose),
     stringsAsFactors = FALSE
@@ -31,12 +37,21 @@ prepare_cgmissingdata_input <- function(data) {
 #' Run CGMissingDataR missing glucose imputation
 #'
 #' @param data Standardized CGM data.
-#' @param model Imputation model. Defaults to `mice_only`.
 #' @param seed Integer seed.
+#' @param backend Imputation backend. Use `mice` for R-native imputation or
+#'   `sklearn` for the Python backend.
 #'
 #' @return Output from `CGMissingDataR::run_missing_glucose_imputation()`.
-#' @export
-run_cgmissingdata_imputation <- function(data, model = "mice_only", seed = 42) {
+#' @noRd
+run_cgmissingdata_imputation <- function(
+  data,
+  seed = 42,
+  backend = "mice",
+  interval_minutes = 5L,
+  arima_threshold = 0.05,
+  arima_min_history = 20L,
+  xgb_rounds = 300L
+) {
   fun <- cgmissingdata_function()
   if (is.null(fun)) {
     stop(
@@ -52,39 +67,44 @@ run_cgmissingdata_imputation <- function(data, model = "mice_only", seed = 42) {
   }
 
   imputation_input <- prepare_cgmissingdata_input(data)
-  fun(
+  result <- fun(
     imputation_input,
     target_col = "glucose",
     feature_cols = character(0),
-    id_col = "id",
+    id_col = "subject_index",
     time_col = "time",
-    models = model,
-    seed = seed
+    seed = seed,
+    interval_minutes = interval_minutes,
+    use_arima_if_missing_leq = arima_threshold,
+    arima_min_history = arima_min_history,
+    xgb_nrounds = xgb_rounds,
+    imputer_backend = backend,
+    export = FALSE
   )
-}
-
-select_imputed_table <- function(imputation_result, model = "mice_only") {
-  if (is.null(imputation_result$imputed_data)) {
-    stop("CGMissingDataR output did not include imputed_data.", call. = FALSE)
+  result <- as.data.frame(result, stringsAsFactors = FALSE)
+  if (!"imputation_method" %in% names(result)) {
+    result$imputation_method <- if (identical(backend, "sklearn")) "sklearn" else "mice"
   }
-  if (!model %in% names(imputation_result$imputed_data)) {
-    stop("CGMissingDataR output did not include model: ", model, call. = FALSE)
+  if (!"missing_rate" %in% names(result)) {
+    result$missing_rate <- mean(is.na(data$glucose))
   }
-  as.data.frame(imputation_result$imputed_data[[model]], stringsAsFactors = FALSE)
+  result
 }
 
 #' Apply imputed glucose values to standardized CGM data
 #'
 #' @param data Standardized CGM data.
 #' @param imputation_result Result from `run_cgmissingdata_imputation()`.
-#' @param model Imputation model name.
 #'
 #' @return Standardized CGM data with imputed glucose values and flags.
-#' @export
-apply_imputed_glucose <- function(data, imputation_result, model = "mice_only") {
-  imputed <- select_imputed_table(imputation_result, model = model)
-  row_id_col <- if (".RowID" %in% names(imputed)) ".RowID" else ".row_id"
-  needed <- c(row_id_col, ".Missing", "ImputedValue")
+#' @noRd
+apply_imputed_glucose <- function(data, imputation_result) {
+  if (!is.data.frame(imputation_result)) {
+    stop("CGMissingDataR imputation result must be a data frame.", call. = FALSE)
+  }
+  imputed <- as.data.frame(imputation_result, stringsAsFactors = FALSE)
+  row_id_col <- ".row_id"
+  needed <- c(row_id_col, "imputed_glucose_value")
   missing_cols <- setdiff(needed, names(imputed))
   if (length(missing_cols)) {
     stop("CGMissingDataR imputed data missing columns: ", paste(missing_cols, collapse = ", "), call. = FALSE)
@@ -96,14 +116,20 @@ apply_imputed_glucose <- function(data, imputation_result, model = "mice_only") 
   imputed <- imputed[valid, , drop = FALSE]
   row_id <- row_id[valid]
 
-  originally_missing <- is.na(out$glucose[row_id]) & (imputed$.Missing %in% TRUE)
+  originally_missing <- is.na(out$glucose[row_id])
   fill_rows <- row_id[originally_missing]
-  fill_values <- as.numeric(imputed$ImputedValue[originally_missing])
-  fill_ok <- !is.na(fill_values)
+  fill_values <- as.numeric(imputed$imputed_glucose_value[originally_missing])
+  fill_ok <- is.finite(fill_values)
 
   if (any(fill_ok)) {
     out$glucose[fill_rows[fill_ok]] <- fill_values[fill_ok]
     out$imputed_flag[fill_rows[fill_ok]] <- TRUE
+  }
+  if ("imputation_method" %in% names(imputed)) {
+    attr(out, "imputation_method") <- first_non_missing(unique(as.character(imputed$imputation_method)), NA_character_)
+  }
+  if ("missing_rate" %in% names(imputed)) {
+    attr(out, "imputation_missing_rate") <- first_non_missing(unique(as.numeric(imputed$missing_rate)), NA_real_)
   }
   out
 }
@@ -116,8 +142,12 @@ analysis_data_from_settings <- function(data, settings) {
 
   result <- run_cgmissingdata_imputation(
     data(),
-    model = settings()$imputation_model %||% "mice_only",
-    seed = settings()$imputation_seed %||% 42
+    seed = settings()$imputation_seed %||% 42,
+    backend = settings()$imputation_backend %||% "mice",
+    interval_minutes = settings()$imputation_interval_minutes %||% 5L,
+    arima_threshold = settings()$imputation_arima_threshold %||% 0.05,
+    arima_min_history = settings()$imputation_arima_min_history %||% 20L,
+    xgb_rounds = settings()$imputation_xgb_rounds %||% 300L
   )
-  apply_imputed_glucose(data(), result, model = settings()$imputation_model %||% "mice_only")
+  apply_imputed_glucose(data(), result)
 }

@@ -16,7 +16,7 @@ empty_gap_periods <- function() {
 #' @param gap_multiplier Gap threshold as a multiple of median interval.
 #'
 #' @return A data frame of detected gap periods.
-#' @export
+#' @noRd
 detect_gap_periods <- function(data, gap_multiplier = 1.5) {
   if (!all(c("id", "timestamp") %in% names(data))) {
     stop("Gap detection requires standardized columns: id and timestamp.", call. = FALSE)
@@ -69,7 +69,7 @@ detect_gap_periods <- function(data, gap_multiplier = 1.5) {
 #' @param valid_day_hours Minimum observed hours for a valid CGM day.
 #'
 #' @return A data frame with per-participant missingness summaries.
-#' @export
+#' @noRd
 compute_missingness_summary <- function(data, valid_day_hours = 14) {
   qc <- compute_qc_summary(data, valid_day_hours = valid_day_hours)
   gaps <- detect_gap_periods(data)
@@ -166,7 +166,7 @@ compute_missingness_heatmap_data <- function(data, gaps = NULL) {
     "<br>Missing glucose: ", daily$missing_glucose,
     "<br>Missing glucose rate: ", daily$missing_glucose_rate, "%",
     "<br>Timestamp gaps: ", daily$timestamp_gaps,
-    "<br>Estimated missing readings: ", daily$estimated_missing_readings,
+    "<br>Estimated missing readings from gaps: ", daily$estimated_missing_readings,
     "<br>Imputed rows: ", daily$imputed_rows
   )
   as.data.frame(daily, stringsAsFactors = FALSE)
@@ -175,18 +175,27 @@ compute_missingness_heatmap_data <- function(data, gaps = NULL) {
 coverage_status <- function(coverage_percent, readings) {
   out <- rep("No data", length(coverage_percent))
   has_data <- !is.na(readings) & readings > 0L
-  out[has_data & coverage_percent < 50] <- "Low coverage"
-  out[has_data & coverage_percent >= 50 & coverage_percent < 80] <- "Partial coverage"
-  out[has_data & coverage_percent >= 80] <- "High coverage"
-  factor(out, levels = c("No data", "Low coverage", "Partial coverage", "High coverage"), ordered = TRUE)
+  out[has_data & coverage_percent < 50] <- "Low coverage (<50%)"
+  out[has_data & coverage_percent >= 50 & coverage_percent < 80] <- "Partial coverage (50-79%)"
+  out[has_data & coverage_percent >= 80] <- "High coverage (>=80%)"
+  factor(
+    out,
+    levels = c(
+      "No data",
+      "Low coverage (<50%)",
+      "Partial coverage (50-79%)",
+      "High coverage (>=80%)"
+    ),
+    ordered = TRUE
+  )
 }
 
 coverage_status_color <- function(status) {
   colors <- c(
     "No data" = "#D0D5DD",
-    "Low coverage" = "#D92D20",
-    "Partial coverage" = "#FDB022",
-    "High coverage" = "#2E90FA"
+    "Low coverage (<50%)" = "#D92D20",
+    "Partial coverage (50-79%)" = "#FDB022",
+    "High coverage (>=80%)" = "#2E90FA"
   )
   unname(colors[as.character(status)])
 }
@@ -399,7 +408,7 @@ compute_missingness_calendar_data <- function(data, gaps = NULL, date_range = NU
     "<br>Missing glucose: ", daily$missing_glucose,
     "<br>Missing glucose rate: ", ifelse(is.na(daily$missing_glucose_rate), "no readings", paste0(daily$missing_glucose_rate, "%")),
     "<br>Timestamp gaps: ", daily$timestamp_gaps,
-    "<br>Estimated missing readings: ", daily$estimated_missing_readings,
+    "<br>Estimated missing readings from gaps: ", daily$estimated_missing_readings,
     "<br>Imputed rows: ", daily$imputed_rows
   )
   add_compact_calendar_positions(daily, ids)
@@ -433,10 +442,11 @@ filled_glucose_by_id <- function(original_data, analysis_data, ids) {
 #' @param original_data Standardized CGM data before optional imputation.
 #' @param analysis_data Current analysis CGM data after preprocessing settings.
 #' @param valid_day_hours Minimum observed hours for a valid CGM day.
+#' @param include_preprocessing Whether to include before/after preprocessing columns.
 #'
 #' @return A compact participant-level before/after table.
-#' @export
-compare_missingness_summaries <- function(original_data, analysis_data, valid_day_hours = 14) {
+#' @noRd
+compare_missingness_summaries <- function(original_data, analysis_data, valid_day_hours = 14, include_preprocessing = FALSE) {
   original <- compute_missingness_summary(original_data, valid_day_hours = valid_day_hours)
   analysis <- compute_missingness_summary(analysis_data, valid_day_hours = valid_day_hours)
   ids <- sort(unique(c(original$id, analysis$id)))
@@ -449,19 +459,32 @@ compare_missingness_summaries <- function(original_data, analysis_data, valid_da
   analysis_match <- match(ids, analysis$id)
   filled <- filled_glucose_by_id(original_data, analysis_data, ids)
 
-  out <- data.frame(
-    `Subject ID` = ids,
-    `Missing glucose` = original$missing_glucose[original_match],
-    `Missing glucose rate (%)` = original$missing_glucose_rate[original_match],
-    `Missing glucose after preprocessing` = analysis$missing_glucose[analysis_match],
-    `Missing glucose rate after preprocessing (%)` = analysis$missing_glucose_rate[analysis_match],
-    `Filled glucose rows` = as.integer(filled[ids]),
-    `Timestamp gaps` = original$gap_count[original_match],
-    `Estimated missing readings` = original$estimated_missing_readings[original_match],
-    `Valid days` = analysis$valid_days[analysis_match],
-    check.names = FALSE,
-    stringsAsFactors = FALSE
-  )
+  if (isTRUE(include_preprocessing)) {
+    out <- data.frame(
+      `Subject ID` = ids,
+      `Missing glucose rows before preprocessing` = original$missing_glucose[original_match],
+      `Missing glucose (%) before preprocessing` = original$missing_glucose_rate[original_match],
+      `Missing glucose rows after preprocessing` = analysis$missing_glucose[analysis_match],
+      `Missing glucose (%) after preprocessing` = analysis$missing_glucose_rate[analysis_match],
+      `Filled glucose rows` = as.integer(filled[ids]),
+      `Timestamp gaps` = original$gap_count[original_match],
+      `Estimated missing readings from gaps` = original$estimated_missing_readings[original_match],
+      `Valid days` = analysis$valid_days[analysis_match],
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  } else {
+    out <- data.frame(
+      `Subject ID` = ids,
+      `Missing glucose rows` = analysis$missing_glucose[analysis_match],
+      `Missing glucose (%)` = analysis$missing_glucose_rate[analysis_match],
+      `Timestamp gaps` = analysis$gap_count[analysis_match],
+      `Estimated missing readings from gaps` = analysis$estimated_missing_readings[analysis_match],
+      `Valid days` = analysis$valid_days[analysis_match],
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  }
   if (!subject_id_filter_available(analysis_data)) {
     out <- out[, setdiff(names(out), "Subject ID"), drop = FALSE]
   }
@@ -480,6 +503,22 @@ format_imputation_method <- function(method) {
   }
 }
 
+format_imputation_backend <- function(backend) {
+  if (identical(backend, "sklearn")) {
+    "Python/sklearn"
+  } else {
+    "R/mice"
+  }
+}
+
+format_returned_imputation_method <- function(method, fallback = "MICE imputation") {
+  method <- method %||% NA_character_
+  if (is.na(method) || !nzchar(method)) {
+    return(fallback)
+  }
+  gsub("\\+", " + ", method)
+}
+
 #' Summarize imputation status for user-facing QC
 #'
 #' @param original_data Standardized CGM data before optional imputation.
@@ -487,13 +526,27 @@ format_imputation_method <- function(method) {
 #' @param settings Reproducibility settings list.
 #'
 #' @return A one-row data frame with imputation status details.
-#' @export
+#' @noRd
 summarize_imputation_status <- function(original_data, analysis_data, settings) {
   method <- settings$imputation_method %||% "none"
   available <- isTRUE(settings$imputation_available %||% cgmissingdata_available())
   seed <- settings$imputation_seed %||% NA_integer_
+  backend <- settings$imputation_backend %||% "mice"
+  imputation_error <- attr(analysis_data, "imputation_error", exact = TRUE)
+  returned_method <- attr(analysis_data, "imputation_method", exact = TRUE)
+  returned_missing_rate <- attr(analysis_data, "imputation_missing_rate", exact = TRUE)
   original_missing <- sum(is.na(original_data$glucose))
   analysis_missing <- sum(is.na(analysis_data$glucose))
+  original_rows <- nrow(original_data)
+  analysis_rows <- nrow(analysis_data)
+  original_missing_percent <- if (original_rows > 0L) round(100 * original_missing / original_rows, 2) else NA_real_
+  analysis_missing_percent <- if (analysis_rows > 0L) round(100 * analysis_missing / analysis_rows, 2) else NA_real_
+  gaps <- tryCatch(detect_gap_periods(original_data), error = function(error) empty_gap_periods())
+  estimated_gap_readings <- if (is.data.frame(gaps) && "estimated_missing_readings" %in% names(gaps)) {
+    sum(gaps$estimated_missing_readings, na.rm = TRUE)
+  } else {
+    NA_integer_
+  }
   rows_filled <- sum(
     is.na(original_data$glucose) &
       !is.na(analysis_data$glucose) &
@@ -506,27 +559,74 @@ summarize_imputation_status <- function(original_data, analysis_data, settings) 
     message <- "Imputation is off. Analysis uses the original standardized data."
   } else if (!available) {
     status <- "Unavailable"
-    message <- "MICE imputation is selected, but the imputation feature is not available in this R session."
+    message <- "Imputation is selected, but the selected imputation option is not available in this R session. Analysis uses the original standardized data."
+  } else if (!is.null(imputation_error) && nzchar(imputation_error)) {
+    status <- "Could not apply"
+    message <- "Imputation was selected, but analysis is using the original standardized data because imputation could not be completed."
   } else if (original_missing == 0L) {
     status <- "Not needed"
-    message <- "No missing glucose values are available for imputation."
+    message <- "No missing glucose rows were detected, so imputation was not needed. Analysis uses the original standardized data."
   } else if (rows_filled > 0L) {
     status <- "Applied"
-    message <- paste("MICE imputation filled", rows_filled, "missing glucose row(s).")
+    message <- paste("Imputation filled", rows_filled, "missing glucose row(s). Analysis uses imputed glucose values for filled rows.")
   } else {
-    status <- "No rows filled"
-    message <- "MICE imputation was selected, but no glucose values were filled."
+    status <- "Could not apply"
+    message <- "Imputation was selected, but no glucose values were filled. Analysis uses the original standardized data."
   }
 
   data.frame(
-    Method = format_imputation_method(method),
+    Method = if (identical(method, "mice_only")) {
+      format_returned_imputation_method(returned_method, format_imputation_method(method))
+    } else {
+      format_imputation_method(method)
+    },
+    Backend = if (identical(method, "mice_only")) format_imputation_backend(backend) else "",
     Status = status,
     Seed = seed,
+    `Missing rate used by imputation (%)` = if (is.numeric(returned_missing_rate) && is.finite(returned_missing_rate)) round(100 * returned_missing_rate, 2) else NA_real_,
     `Original missing glucose` = original_missing,
+    `Original missing glucose (%)` = original_missing_percent,
     `Analysis missing glucose` = analysis_missing,
+    `Analysis missing glucose (%)` = analysis_missing_percent,
     `Filled glucose rows` = rows_filled,
+    `Estimated missing readings from gaps` = estimated_gap_readings,
     Message = message,
     check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+}
+
+preprocessing_comparison_summary <- function(imputation_status) {
+  if (
+    !is.data.frame(imputation_status) ||
+      !nrow(imputation_status) ||
+      !"Method" %in% names(imputation_status) ||
+      identical(imputation_status$Method[[1L]], "None")
+  ) {
+    return(data.frame(
+      Label = character(),
+      Value = character(),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  data.frame(
+    Label = c(
+      "Original missing glucose rows",
+      "Original missing glucose (%)",
+      "Missing glucose rows after preprocessing",
+      "Missing glucose (%) after preprocessing",
+      "Filled glucose rows",
+      "Estimated missing readings from gaps"
+    ),
+    Value = c(
+      format_count(imputation_status[["Original missing glucose"]][[1L]]),
+      paste0(format(round(imputation_status[["Original missing glucose (%)"]][[1L]], 2), trim = TRUE), "%"),
+      format_count(imputation_status[["Analysis missing glucose"]][[1L]]),
+      paste0(format(round(imputation_status[["Analysis missing glucose (%)"]][[1L]], 2), trim = TRUE), "%"),
+      format_count(imputation_status[["Filled glucose rows"]][[1L]]),
+      format_count(imputation_status[["Estimated missing readings from gaps"]][[1L]])
+    ),
     stringsAsFactors = FALSE
   )
 }
@@ -536,7 +636,7 @@ summarize_imputation_status <- function(original_data, analysis_data, settings) 
 #' @param data Standardized CGM data.
 #'
 #' @return A ggplot object.
-#' @export
+#' @noRd
 create_missingness_timeline_plot <- function(data) {
   if (!nrow(data) || !any(is_finite_cgm_timestamp(data$timestamp))) {
     return(empty_plot("No valid timestamps available"))
@@ -614,24 +714,54 @@ missingness_calendar_month_ticks <- function(calendar_data) {
   months[!duplicated(months$month), , drop = FALSE]
 }
 
-create_missingness_heatmap_plot <- function(data, gaps = NULL, participant = "", date_range = NULL) {
+missingness_calendar_dimensions <- function(calendar_data, show_subject_id = TRUE) {
+  ids <- if (is.data.frame(calendar_data) && "id" %in% names(calendar_data)) {
+    unique(as.character(calendar_data$id))
+  } else {
+    character()
+  }
+  ids <- ids[!is.na(ids) & nzchar(ids)]
+  subject_count <- max(1L, length(ids))
+  month_count <- if (is.data.frame(calendar_data) && "month" %in% names(calendar_data)) {
+    length(unique(as.character(calendar_data$month)))
+  } else {
+    1L
+  }
+  max_id_chars <- if (isTRUE(show_subject_id) && length(ids)) max(nchar(ids), na.rm = TRUE) else 0L
+  label_margin <- if (isTRUE(show_subject_id)) max(130L, min(280L, 82L + max_id_chars * 7L)) else 70L
+  bottom_margin <- if (month_count > 10L) 125L else 95L
+
+  list(
+    subject_count = subject_count,
+    month_count = max(1L, month_count),
+    height = max(340L, min(1400L, 185L + subject_count * 82L)),
+    marker_size = if (subject_count > 12L) 9L else 11L,
+    margin = list(l = label_margin, r = 30L, t = 45L, b = bottom_margin),
+    x_tick_angle = if (month_count > 10L) -35L else 0L
+  )
+}
+
+create_missingness_heatmap_plot <- function(data, gaps = NULL, participant = "", date_range = NULL, calendar_data = NULL) {
   show_subject_id <- subject_id_filter_available(data)
-  participant <- normalize_filter_value(participant)
-  if (nzchar(participant)) {
-    data <- data[data$id == participant, , drop = FALSE]
-    if (!is.null(gaps) && nrow(gaps) && "id" %in% names(gaps)) {
-      gaps <- gaps[gaps$id == participant, , drop = FALSE]
+  if (is.null(calendar_data)) {
+    participant <- normalize_filter_value(participant)
+    if (nzchar(participant)) {
+      data <- data[data$id == participant, , drop = FALSE]
+      if (!is.null(gaps) && nrow(gaps) && "id" %in% names(gaps)) {
+        gaps <- gaps[gaps$id == participant, , drop = FALSE]
+      }
     }
+    calendar_data <- compute_missingness_calendar_data(data, gaps = gaps, date_range = date_range)
   }
 
-  calendar_data <- compute_missingness_calendar_data(data, gaps = gaps, date_range = date_range)
   if (!nrow(calendar_data)) {
     return(empty_missingness_calendar_plot())
   }
 
   y_labels <- missingness_calendar_axis_labels(calendar_data, show_subject_id = show_subject_id)
   month_ticks <- missingness_calendar_month_ticks(calendar_data)
-  plot <- plotly::plot_ly()
+  dimensions <- missingness_calendar_dimensions(calendar_data, show_subject_id = show_subject_id)
+  plot <- plotly::plot_ly(height = dimensions$height)
   statuses <- levels(calendar_data$coverage_status)
 
   for (status in statuses) {
@@ -650,7 +780,7 @@ create_missingness_heatmap_plot <- function(data, gaps = NULL, participant = "",
       showlegend = TRUE,
       marker = list(
         symbol = "square",
-        size = 11,
+        size = dimensions$marker_size,
         color = coverage_status_color(status),
         line = list(color = "white", width = 0.8)
       ),
@@ -666,6 +796,7 @@ create_missingness_heatmap_plot <- function(data, gaps = NULL, participant = "",
       tickmode = "array",
       tickvals = month_ticks$calendar_x,
       ticktext = as.character(month_ticks$month),
+      tickangle = dimensions$x_tick_angle,
       showgrid = FALSE,
       zeroline = FALSE
     ),
@@ -685,7 +816,7 @@ create_missingness_heatmap_plot <- function(data, gaps = NULL, participant = "",
       x = 0,
       y = -0.16
     ),
-    margin = list(l = 130, r = 30, t = 45, b = 90),
+    margin = dimensions$margin,
     hovermode = "closest"
   )
 }

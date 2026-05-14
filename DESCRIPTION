@@ -8,8 +8,8 @@ Author: Shubh Saraswat [aut, cre]
 Maintainer: Shubh Saraswat <shubh.saraswat00@gmail.com>
 Description: A modular Shiny application for continuous glucose monitoring
     data upload, quality control, preprocessing, clinically relevant CGM
-    metrics, visual analytics, statistical comparison, and future nonlinear
-    complexity analysis. The application prefers CGManalyzer for standard CGM
+    metrics, visual analytics, nonlinear complexity analysis, and statistical
+    comparison. The application prefers CGManalyzer for standard CGM
     analysis, uses iglu selectively for gaps or validation, and can use a
     current GitHub version of CGMissingDataR that exports
     run_missing_glucose_imputation() for missing glucose imputation workflows.
@@ -28,6 +28,7 @@ Imports:
     ggplot2,
     later,
     plotly,
+    pracma,
     promises,
     readr,
     readxl,

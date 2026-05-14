@@ -108,7 +108,7 @@ summarize_qc_dt <- function(data, valid_day_hours, glucose_min, glucose_max) {
 #' @param glucose_max Maximum plausible glucose value in mg/dL.
 #'
 #' @return Data frame with one QC row per participant.
-#' @export
+#' @noRd
 compute_qc_summary <- function(
   data,
   valid_day_hours = 14,
@@ -129,10 +129,86 @@ compute_qc_summary <- function(
   out
 }
 
-prepare_qc_display <- function(qc_summary, source_data = NULL) {
+qc_review_notes <- function(qc_summary, low_coverage_percent = 80) {
+  if (!is.data.frame(qc_summary) || !nrow(qc_summary)) {
+    return(character())
+  }
+
+  vapply(seq_len(nrow(qc_summary)), function(i) {
+    row <- qc_summary[i, , drop = FALSE]
+    notes <- character()
+    if (!is.na(row$missing_glucose) && row$missing_glucose > 0L) {
+      notes <- c(notes, paste(row$missing_glucose, "missing glucose row(s)"))
+    }
+    if (!is.na(row$gap_count) && row$gap_count > 0L) {
+      notes <- c(notes, paste(row$gap_count, "timestamp gap(s)"))
+    }
+    if (!is.na(row$duplicate_timestamps) && row$duplicate_timestamps > 0L) {
+      notes <- c(notes, paste(row$duplicate_timestamps, "duplicate timestamp(s)"))
+    }
+    if (!is.na(row$implausible_values) && row$implausible_values > 0L) {
+      notes <- c(notes, paste(row$implausible_values, "glucose value(s) outside review range"))
+    }
+    if (!is.na(row$valid_days) && row$valid_days == 0L) {
+      notes <- c(notes, "No valid CGM days")
+    }
+    if (
+      !is.na(row$wear_time_percent) &&
+        row$wear_time_percent < low_coverage_percent
+    ) {
+      notes <- c(notes, paste0("Coverage below ", low_coverage_percent, "%"))
+    }
+    if (length(notes)) {
+      paste(notes, collapse = "; ")
+    } else {
+      "No review flags"
+    }
+  }, character(1))
+}
+
+add_qc_review_columns <- function(qc_summary, low_coverage_percent = 80) {
   out <- as.data.frame(qc_summary, stringsAsFactors = FALSE)
   if (!nrow(out)) {
+    out$`QC status` <- character()
+    out$`Review notes` <- character()
     return(out)
+  }
+  notes <- qc_review_notes(out, low_coverage_percent = low_coverage_percent)
+  out$`QC status` <- ifelse(notes == "No review flags", "OK", "Review")
+  out$`Review notes` <- notes
+
+  front <- intersect(c("id", "QC status", "Review notes"), names(out))
+  out[, c(front, setdiff(names(out), front)), drop = FALSE]
+}
+
+qc_display_column_labels <- function() {
+  c(
+    readings = "Readings",
+    first_timestamp = "First timestamp",
+    last_timestamp = "Last timestamp",
+    observed_days = "Observed days",
+    valid_days = "Valid days",
+    median_interval_minutes = "Median interval (minutes)",
+    wear_time_percent = "Coverage (%)",
+    missing_glucose = "Missing glucose",
+    duplicate_timestamps = "Duplicate timestamps",
+    implausible_values = "Implausible glucose values",
+    gap_count = "Timestamp gaps",
+    max_gap_minutes = "Max gap (minutes)"
+  )
+}
+
+apply_qc_display_labels <- function(qc_display) {
+  labels <- qc_display_column_labels()
+  matched <- intersect(names(qc_display), names(labels))
+  names(qc_display)[match(matched, names(qc_display))] <- unname(labels[matched])
+  qc_display
+}
+
+prepare_qc_display <- function(qc_summary, source_data = NULL) {
+  out <- add_qc_review_columns(qc_summary)
+  if (!nrow(out)) {
+    return(apply_qc_display_labels(out))
   }
   if ("id" %in% names(out)) {
     if (subject_id_filter_available(source_data %||% out)) {
@@ -141,5 +217,44 @@ prepare_qc_display <- function(qc_summary, source_data = NULL) {
       out$id <- NULL
     }
   }
-  out
+  apply_qc_display_labels(out)
+}
+
+duplicate_timestamp_note <- function(qc_summary, source_data = NULL) {
+  if (
+    !is.data.frame(qc_summary) ||
+      !nrow(qc_summary) ||
+      !"duplicate_timestamps" %in% names(qc_summary)
+  ) {
+    return(NULL)
+  }
+
+  duplicate_counts <- qc_summary$duplicate_timestamps
+  duplicate_counts[is.na(duplicate_counts)] <- 0L
+  total <- sum(duplicate_counts)
+  if (total <= 0L) {
+    return(NULL)
+  }
+
+  affected_subjects <- sum(duplicate_counts > 0L)
+  show_subject_id <- subject_id_filter_available(source_data %||% qc_summary)
+  message <- if (show_subject_id) {
+    paste(
+      format_count(total),
+      "duplicate timestamp(s) detected across",
+      format_count(affected_subjects),
+      "Subject ID(s). Review duplicate timestamps before final analysis if they are unexpected."
+    )
+  } else {
+    paste(
+      format_count(total),
+      "duplicate timestamp(s) detected. Review duplicate timestamps before final analysis if they are unexpected."
+    )
+  }
+
+  list(
+    total_duplicate_timestamps = total,
+    affected_subjects = affected_subjects,
+    message = message
+  )
 }

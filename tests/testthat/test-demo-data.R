@@ -1,29 +1,74 @@
-test_that("bundled demo data loads and standardizes", {
-  demo <- load_demo_cgm_data()
-
-  expect_named(demo, c("id", "time", "glucose", "group", "visit", "device", ".source_file", ".source_id"))
-  expect_equal(nrow(demo), 144)
-  expect_equal(sort(unique(demo$id)), c("CGM001", "CGM002"))
-  expect_equal(unique(demo$.source_id), "demo_cgm")
-
-  standardized <- standardize_cgm_data(
-    demo,
-    mapping = list(
-      id = "id",
-      timestamp = "time",
-      glucose = "glucose",
-      group = "group",
-      visit = "visit",
-      device = "device"
+test_that("bundled example datasets load with expected missingness", {
+  examples <- list(
+    complete = list(
+      data = load_example_complete_cgm_data(),
+      file = "cgm_example_complete",
+      rows = 500L,
+      missing = 0L,
+      readings_per_subject = rep(100L, 5)
+    ),
+    missing_5pct = list(
+      data = load_example_missing_5pct_cgm_data(),
+      file = "CGMExmplDat5Pct",
+      rows = 1440L,
+      missing = 72L,
+      readings_per_subject = rep(288L, 5)
+    ),
+    missing_10pct = list(
+      data = load_example_missing_10pct_cgm_data(),
+      file = "CGMExmplDat10Pct",
+      rows = 1440L,
+      missing = 144L,
+      readings_per_subject = rep(288L, 5)
     )
   )
 
-  qc <- compute_qc_summary(standardized)
-  metrics <- compute_core_metrics(standardized)
+  for (example in examples) {
+    expect_true(all(
+      c(
+        "USUBJID",
+        "LBORRES",
+        "Time",
+        "AGE",
+        "hba1c",
+        ".source_file",
+        ".source_id"
+      ) %in%
+        names(example$data)
+    ))
+    expect_equal(nrow(example$data), example$rows)
+    expect_equal(length(unique(example$data$USUBJID)), 5)
+    expect_equal(unique(example$data$.source_id), example$file)
+    expect_equal(sum(is.na(example$data$LBORRES)), example$missing)
+  }
+})
 
-  expect_equal(nrow(qc), 2)
-  expect_equal(qc$readings, c(72, 72))
-  expect_equal(qc$median_interval_minutes, c(60, 60))
-  expect_equal(nrow(metrics), 2)
-  expect_true(all(c("conga_2h", "modd", "lbgi", "hbgi", "j_index", "mage") %in% names(metrics)))
+test_that("bundled examples standardize with colon timestamps and expected missing glucose", {
+  examples <- list(
+    list(data = load_example_complete_cgm_data(), rows = 500L, missing = 0L, readings_per_subject = rep(100L, 5)),
+    list(data = load_example_missing_5pct_cgm_data(), rows = 1440L, missing = 72L, readings_per_subject = rep(288L, 5)),
+    list(data = load_example_missing_10pct_cgm_data(), rows = 1440L, missing = 144L, readings_per_subject = rep(288L, 5))
+  )
+
+  for (example in examples) {
+    standardized <- standardize_cgm_data(
+      example$data,
+      mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
+    )
+    qc <- compute_qc_summary(standardized)
+    metrics <- compute_core_metrics(standardized)
+
+    expect_equal(nrow(standardized), example$rows)
+    expect_equal(length(subject_id_values(standardized)), 5)
+    expect_equal(sum(is.na(standardized$timestamp)), 0)
+    expect_equal(sum(is.na(standardized$glucose)), example$missing)
+    expect_equal(nrow(qc), 5)
+    expect_equal(qc$readings, example$readings_per_subject)
+    expect_equal(qc$median_interval_minutes, rep(5, 5))
+    expect_equal(nrow(metrics), 5)
+    expect_true(all(
+      c("conga_2h", "modd", "lbgi", "hbgi", "j_index", "mage") %in%
+        names(metrics)
+    ))
+  }
 })

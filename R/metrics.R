@@ -147,7 +147,7 @@ compute_base_metric_state <- function(data, thresholds = default_cgm_thresholds(
 
   tryCatch({
     base <- compute_base_core_metrics(data, thresholds = thresholds)
-    display <- prepare_metrics_display(base)
+    display <- prepare_metrics_display(base, thresholds = thresholds)
     if (!nrow(base) || !nrow(display)) {
       return(metric_state("no_analysis_rows", data = data, base = base, display = display))
     }
@@ -214,7 +214,7 @@ merge_core_metric_outputs <- function(base, adapters, by = default_metric_groups
 #' @param by Grouping columns.
 #'
 #' @return Data frame of metric summaries.
-#' @export
+#' @noRd
 compute_core_metrics <- function(
   data,
   thresholds = default_cgm_thresholds(),

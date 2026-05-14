@@ -3,7 +3,7 @@
 #' @param data Standardized CGM data.
 #'
 #' @return A data frame with `id`, `time`, and `gl` columns.
-#' @export
+#' @noRd
 to_iglu_data <- function(data) {
   if (!all(c("id", "timestamp", "glucose") %in% names(data))) {
     stop("iglu conversion requires standardized columns: id, timestamp, glucose.", call. = FALSE)
@@ -64,7 +64,7 @@ merge_iglu_metric <- function(base, metric) {
 #'
 #' @return A data frame with regular timestamps and glucose values. The selected
 #'   interval is stored in the `interval_minutes` attribute.
-#' @export
+#' @noRd
 regularize_cgm_series <- function(data, interval_minutes = NULL, max_gap_intervals = 4) {
   if (!all(c("timestamp", "glucose") %in% names(data))) {
     stop("Regularization requires timestamp and glucose columns.", call. = FALSE)
@@ -132,7 +132,7 @@ adapter_group_values <- function(x, group_columns) {
 #' @param max_gap_intervals Maximum gap to interpolate during regularization.
 #'
 #' @return A data frame with CGManalyzer metric columns.
-#' @export
+#' @noRd
 compute_cgmanalyzer_metrics <- function(
   data,
   by = default_metric_groups(data),
@@ -194,7 +194,7 @@ compute_cgmanalyzer_metrics <- function(
 #' @param by Grouping columns.
 #'
 #' @return A data frame with iglu metric columns.
-#' @export
+#' @noRd
 compute_iglu_metrics <- function(data, by = default_metric_groups(data)) {
   by <- by[by %in% names(data)]
   if (!length(by)) {

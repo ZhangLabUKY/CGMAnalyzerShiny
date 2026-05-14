@@ -19,7 +19,7 @@ export_module_server <- function(id, standardized, analysis_data, metrics, qc_su
 
     output$download_metrics <- shiny::downloadHandler(
       filename = function() "cgm_core_metrics.csv",
-      content = function(file) utils::write.csv(prepare_metrics_display(metrics()), file, row.names = FALSE)
+      content = function(file) utils::write.csv(prepare_metrics_display(metrics(), thresholds = settings()$thresholds_mg_dl), file, row.names = FALSE)
     )
 
     output$download_analysis <- shiny::downloadHandler(
