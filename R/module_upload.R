@@ -65,16 +65,53 @@ upload_module_server <- function(id) {
       ignoreInit = TRUE
     )
 
+    file_probes <- shiny::reactive({
+      files <- input$cgm_files
+      if (is.null(files) || !nrow(files)) {
+        return(list())
+      }
+      Map(probe_cgm_file_import, files$datapath, files$name)
+    })
+
     uploaded <- shiny::reactive({
       files <- input$cgm_files
       if (!is.null(files) && nrow(files) > 0L) {
-        combined <- combine_uploaded_files(files$datapath, files$name)
+        probes <- file_probes()
+        row_boundaries <- selected_import_row_boundaries(probes, input)
         upload_mode <- if (nrow(files) > 1L) "multi_file" else "single_file"
+        combined <- tryCatch(
+          combine_uploaded_files(
+            files$datapath,
+            files$name,
+            header_rows = row_boundaries$header_row,
+            first_data_rows = row_boundaries$first_data_row
+          ),
+          error = function(error) {
+            return(structure(
+              data.frame(),
+              import_error = conditionMessage(error)
+            ))
+          }
+        )
+        import_error <- attr(combined, "import_error", exact = TRUE)
+        if (!is.null(import_error)) {
+          return(list(
+            data = data.frame(),
+            files = files$name,
+            demo = FALSE,
+            upload_mode = upload_mode,
+            import_error = import_error,
+            import_probes = probes,
+            row_boundaries = row_boundaries
+          ))
+        }
         return(list(
           data = combined,
           files = files$name,
           demo = FALSE,
-          upload_mode = upload_mode
+          upload_mode = upload_mode,
+          import_probes = probes,
+          row_boundaries = row_boundaries
         ))
       }
 
@@ -107,8 +144,19 @@ upload_module_server <- function(id) {
       )
     })
 
+    output$import_setup <- shiny::renderUI({
+      probes <- file_probes()
+      import_setup_panel_ui(probes, session$ns)
+    })
+
     output$upload_status <- shiny::renderUI({
       data <- uploaded()
+      if (!is.null(data$import_error)) {
+        return(shiny::div(
+          class = "alert alert-warning",
+          data$import_error
+        ))
+      }
       source_label <- if (isTRUE(data$demo)) "example data" else "uploaded data"
       mode_label <- if (identical(data$upload_mode, "multi_file")) {
         "one file per participant"

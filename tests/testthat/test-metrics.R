@@ -11,7 +11,6 @@ test_that("compute_core_metrics calculates core glucose summaries", {
     units = "mg/dL",
     device = NA_character_,
     group = "Control",
-    visit = "Baseline",
     source_file = NA_character_,
     imputed_flag = FALSE,
     stringsAsFactors = FALSE
@@ -25,7 +24,8 @@ test_that("compute_core_metrics calculates core glucose summaries", {
   expect_equal(metrics$tbr_percent, 25)
   expect_equal(metrics$tar_percent, 25)
   expect_true("metric_engine" %in% names(metrics))
-  expect_true(all(c("conga_2h", "modd", "lbgi", "hbgi", "j_index", "mage") %in% names(metrics)))
+  expect_true(all(c("conga_12h", "conga_24h", "modd", "lbgi", "hbgi", "j_index", "mage") %in% names(metrics)))
+  expect_false("conga_2h" %in% names(metrics))
 })
 
 test_that("base core metrics are available without adapter columns", {
@@ -41,7 +41,6 @@ test_that("base core metrics are available without adapter columns", {
     units = "mg/dL",
     device = NA_character_,
     group = "Control",
-    visit = "Baseline",
     source_file = NA_character_,
     imputed_flag = FALSE,
     stringsAsFactors = FALSE
@@ -51,7 +50,7 @@ test_that("base core metrics are available without adapter columns", {
   display <- prepare_metrics_display(base)
 
   expect_true("mean_glucose" %in% names(base))
-  expect_false(any(c("conga_2h", "modd", "lbgi", "hbgi", "j_index", "mage") %in% names(base)))
+  expect_false(any(c("conga_12h", "conga_24h", "conga_2h", "modd", "lbgi", "hbgi", "j_index", "mage") %in% names(base)))
   expect_true("Mean glucose" %in% display$Metric)
   expect_false("Low blood glucose index" %in% display$Metric)
 })
@@ -90,7 +89,6 @@ test_that("metric display supports base-only and failed-additional metric states
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     stringsAsFactors = FALSE
@@ -103,7 +101,7 @@ test_that("metric display supports base-only and failed-additional metric states
 
   expect_true(nrow(base_display) > 0)
   expect_true("Mean glucose" %in% base_display$Metric)
-  expect_false(any(c("Low blood glucose index", "CONGA, 2 hour") %in% base_display$Metric))
+  expect_false(any(c("Low blood glucose index", "CONGA, 2 hour", "CONGA, 12 hour", "CONGA, 24 hour") %in% base_display$Metric))
   expect_true(nrow(failed_display) > 0)
   expect_true("Mean glucose" %in% failed_display$Metric)
 })
@@ -116,7 +114,6 @@ test_that("base metric state reports ready, empty range, and mapping states", {
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     stringsAsFactors = FALSE
@@ -162,13 +159,12 @@ test_that("base metric state preserves calculation errors without exposing inter
   expect_false(grepl("CGManalyzer|iglu|engine|adapter", status_text$message, ignore.case = TRUE))
 })
 
-test_that("metric filters detect usable group and visit values", {
+test_that("metric filters detect usable group values", {
   no_groups <- prepare_metrics_display(compute_base_core_metrics(data.frame(
     id = rep("A", 2),
     timestamp = parse_cgm_timestamp(c("2026-05-05 08:00:00", "2026-05-05 08:05:00")),
     glucose = c(100, 110),
     group = NA_character_,
-    visit = NA_character_,
     stringsAsFactors = FALSE
   )))
   with_groups <- prepare_metrics_display(compute_base_core_metrics(data.frame(
@@ -176,11 +172,10 @@ test_that("metric filters detect usable group and visit values", {
     timestamp = parse_cgm_timestamp(c("2026-05-05 08:00:00", "2026-05-05 08:05:00")),
     glucose = c(100, 110),
     group = c("Control", "Treatment"),
-    visit = c("Baseline", "Baseline"),
     stringsAsFactors = FALSE
   )))
 
   expect_lt(length(clean_filter_values(no_groups$Group)), 2)
   expect_equal(clean_filter_values(with_groups$Group), c("Control", "Treatment"))
-  expect_lt(length(clean_filter_values(with_groups$Visit)), 2)
+  expect_false("Visit" %in% names(with_groups))
 })

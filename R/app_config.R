@@ -18,6 +18,7 @@ default_cgm_thresholds <- function() {
 #' @param units Source glucose units selected by the user.
 #' @param valid_day_hours Minimum observed hours for a valid CGM day.
 #' @param analysis_date_range Length-two date range used to scope analysis data.
+#' @param expected_study_duration_days Optional protocol duration in days.
 #' @param imputation_method Imputation method label.
 #' @param imputation_backend CGMissingDataR backend, either `mice` or `sklearn`.
 #' @param selected_metrics Character vector of selected metrics.
@@ -31,6 +32,7 @@ create_reproducibility_settings <- function(
   units = "mg/dL",
   valid_day_hours = 14,
   analysis_date_range = c(start = NA_character_, end = NA_character_),
+  expected_study_duration_days = NA_integer_,
   imputation_method = "none",
   imputation_model = "mice_only",
   imputation_seed = 42,
@@ -53,6 +55,7 @@ create_reproducibility_settings <- function(
     source_units = units,
     valid_day_hours = valid_day_hours,
     analysis_date_range = analysis_date_range,
+    expected_study_duration_days = normalize_expected_study_duration_days(expected_study_duration_days),
     imputation_method = imputation_method,
     imputation_model = imputation_model,
     imputation_seed = imputation_seed,

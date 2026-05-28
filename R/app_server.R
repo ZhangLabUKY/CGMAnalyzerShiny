@@ -89,13 +89,22 @@ app_server <- function(input, output, session) {
     if (!has_uploaded_data(upload)) {
       return(NULL)
     }
+    map <- tryCatch(mapping(), shiny.silent.error = function(error) NULL, error = function(error) NULL)
+    preview_ui <- if (required_preview_mappings_selected(map)) {
+      upload_preview_ui("upload")
+    } else {
+      shiny::div(
+        class = "alert alert-light border",
+        "Select Timestamp and Glucose columns to show the data preview."
+      )
+    }
     shiny::tagList(
       shiny::hr(),
       preprocessing_module_ui("preprocessing"),
       shiny::uiOutput("data_setup_status"),
       shiny::uiOutput("data_summary"),
       shiny::hr(),
-      upload_preview_ui("upload")
+      preview_ui
     )
   })
 
@@ -109,31 +118,7 @@ app_server <- function(input, output, session) {
   analysis_data <- shiny::bindCache(shiny::reactive({
     data <- analysis_input()
     current_settings <- settings()
-    if (!identical(current_settings$imputation_method, "mice_only")) {
-      return(data)
-    }
-    if (!isTRUE(current_settings$imputation_available) || !any(is.na(data$glucose))) {
-      return(data)
-    }
-
-    tryCatch(
-      {
-        result <- run_cgmissingdata_imputation(
-          data,
-          seed = current_settings$imputation_seed,
-          backend = current_settings$imputation_backend %||% "mice",
-          interval_minutes = current_settings$imputation_interval_minutes %||% 5L,
-          arima_threshold = current_settings$imputation_arima_threshold %||% 0.05,
-          arima_min_history = current_settings$imputation_arima_min_history %||% 20L,
-          xgb_rounds = current_settings$imputation_xgb_rounds %||% 300L
-        )
-        apply_imputed_glucose(data, result)
-      },
-      error = function(error) {
-        attr(data, "imputation_error") <- conditionMessage(error)
-        data
-      }
-    )
+    apply_imputation_settings(data, current_settings)
   }),
   cgm_data_signature(analysis_input()),
   analysis_date_range_signature(settings()),

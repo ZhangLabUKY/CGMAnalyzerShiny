@@ -52,7 +52,8 @@ metric_display_catalog <- function(thresholds = default_cgm_thresholds()) {
     "lbgi",
     "hbgi",
     "j_index",
-    "conga_2h",
+    "conga_12h",
+    "conga_24h",
     "modd",
     "mage"
   )
@@ -75,7 +76,8 @@ metric_display_catalog <- function(thresholds = default_cgm_thresholds()) {
     "Low blood glucose index",
     "High blood glucose index",
     "J-index",
-    "CONGA, 2 hour",
+    "CONGA, 12 hour",
+    "CONGA, 24 hour",
     "Mean of daily differences",
     "Mean amplitude of glycemic excursions"
   )
@@ -98,7 +100,8 @@ metric_display_catalog <- function(thresholds = default_cgm_thresholds()) {
     "Risk index summarizing exposure to low glucose values.",
     "Risk index summarizing exposure to high glucose values.",
     "Composite index reflecting glucose level and variability.",
-    "Variability metric comparing glucose values separated by two hours.",
+    "Variability metric comparing glucose values separated by 12 hours.",
+    "Variability metric comparing glucose values separated by 24 hours.",
     "Mean absolute difference between matched readings on consecutive days.",
     "Average size of major glucose excursions."
   )
@@ -127,10 +130,12 @@ metric_display_catalog <- function(thresholds = default_cgm_thresholds()) {
       "Risk",
       "Excursions",
       "Excursions",
+      "Excursions",
       "Excursions"
     ),
     units = c(
       "count",
+      "mg/dL",
       "mg/dL",
       "mg/dL",
       "mg/dL",
@@ -152,14 +157,14 @@ metric_display_catalog <- function(thresholds = default_cgm_thresholds()) {
       "mg/dL",
       "mg/dL"
     ),
-    digits = c(0, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2),
+    digits = c(0, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2),
     metric_order = seq_along(raw_name),
     stringsAsFactors = FALSE
   )
 }
 
 metric_identifier_columns <- function(metrics) {
-  c("id", "id_source", "group", "visit")[c("id", "id_source", "group", "visit") %in% names(metrics)]
+  c("id", "id_source", "group")[c("id", "id_source", "group") %in% names(metrics)]
 }
 
 metric_category_order <- function() {
@@ -234,19 +239,16 @@ prepare_metrics_display <- function(metrics, thresholds = default_cgm_thresholds
     if ("group" %in% id_columns) {
       out$Group <- as.character(metrics$group)
     }
-    if ("visit" %in% id_columns) {
-      out$Visit <- as.character(metrics$visit)
-    }
     out
   })
 
   out <- do.call(rbind, rows)
   out$Category <- factor(out$Category, levels = metric_category_order(), ordered = TRUE)
-  order_columns <- c(intersect("Category", names(out)), intersect(c("Subject ID", "Group", "Visit"), names(out)), ".metric_order")
+  order_columns <- c(intersect("Category", names(out)), intersect(c("Subject ID", "Group"), names(out)), ".metric_order")
   out <- out[do.call(order, out[order_columns]), , drop = FALSE]
   out$Category <- as.character(out$Category)
   out$.metric_order <- NULL
-  leading <- c(intersect("Subject ID", names(out)), intersect(c("Group", "Visit"), names(out)))
+  leading <- c(intersect("Subject ID", names(out)), intersect("Group", names(out)))
   out <- out[, c(leading, "Category", "Metric", "Definition", "Value", "Units"), drop = FALSE]
   row.names(out) <- NULL
   out
@@ -256,13 +258,11 @@ filter_metrics_display <- function(
   display,
   participant = "",
   group = "",
-  visit = "",
   category = "",
   include_category = TRUE
 ) {
   participant <- normalize_filter_value(participant)
   group <- normalize_filter_value(group)
-  visit <- normalize_filter_value(visit)
   category <- normalize_filter_value(category)
 
   if ("Subject ID" %in% names(display) && nzchar(participant %||% "")) {
@@ -270,9 +270,6 @@ filter_metrics_display <- function(
   }
   if ("Group" %in% names(display) && nzchar(group %||% "")) {
     display <- display[display$Group == group, , drop = FALSE]
-  }
-  if ("Visit" %in% names(display) && nzchar(visit %||% "")) {
-    display <- display[display$Visit == visit, , drop = FALSE]
   }
   if (isTRUE(include_category) && nzchar(category %||% "")) {
     display <- display[display$Category == category, , drop = FALSE]

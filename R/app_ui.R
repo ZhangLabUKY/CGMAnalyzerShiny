@@ -19,6 +19,7 @@ app_ui <- function() {
         shiny::column(
           7,
           shiny::uiOutput("data_upload_hint"),
+          shiny::uiOutput("upload-import_setup"),
           shiny::uiOutput("data_mapping_ui")
         )
       ),

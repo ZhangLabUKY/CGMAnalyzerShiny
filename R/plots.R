@@ -53,6 +53,42 @@ plot_detail_max_points <- function(detail = "balanced") {
   )
 }
 
+adaptive_plot_target_points <- function() {
+  25000L
+}
+
+adaptive_plot_max_points_per_subject <- function(
+  data,
+  target_total_points = adaptive_plot_target_points(),
+  minimum_per_subject = 250L
+) {
+  if (!is.data.frame(data) || !nrow(data) || !"id" %in% names(data)) {
+    return(Inf)
+  }
+  target_total_points <- suppressWarnings(as.integer(target_total_points[[1L]]))
+  if (is.na(target_total_points) || target_total_points <= 0L) {
+    target_total_points <- adaptive_plot_target_points()
+  }
+  total <- nrow(data)
+  if (total <= target_total_points) {
+    return(Inf)
+  }
+  ids <- clean_filter_values(data$id)
+  subject_count <- max(1L, length(ids))
+  per_subject <- floor(target_total_points / subject_count)
+  max(as.integer(minimum_per_subject), as.integer(per_subject))
+}
+
+plot_display_row_count <- function(data, max_points_per_participant = Inf) {
+  if (!is.data.frame(data) || !nrow(data)) {
+    return(0L)
+  }
+  if (!is.finite(max_points_per_participant)) {
+    return(nrow(data))
+  }
+  nrow(prepare_plot_display_data(data, max_points_per_participant = max_points_per_participant))
+}
+
 select_evenly_spaced_rows <- function(idx, n) {
   if (!length(idx) || n <= 0L) {
     return(integer())
@@ -147,10 +183,9 @@ preserve_plot_day_selection <- function(selected, choices, previous = all_filter
   choice_values[choice_values %in% selected & choice_values != all_filter_value()]
 }
 
-filter_plot_data <- function(data, participant = "", group = "", visit = "", day = "") {
+filter_plot_data <- function(data, participant = "", group = "", day = "") {
   participant <- normalize_filter_value(participant)
   group <- normalize_filter_value(group)
-  visit <- normalize_filter_value(visit)
   day <- normalize_plot_days(day)
 
   if (nzchar(participant)) {
@@ -159,22 +194,19 @@ filter_plot_data <- function(data, participant = "", group = "", visit = "", day
   if ("group" %in% names(data) && nzchar(group)) {
     data <- data[data$group == group, , drop = FALSE]
   }
-  if ("visit" %in% names(data) && nzchar(visit)) {
-    data <- data[data$visit == visit, , drop = FALSE]
-  }
   if (!identical(day, all_filter_value())) {
     data <- data[as.character(as.Date(data$timestamp)) %in% day, , drop = FALSE]
   }
   data
 }
 
-available_plot_days <- function(data, participant = "", group = "", visit = "") {
-  data <- filter_plot_data(data, participant = participant, group = group, visit = visit)
+available_plot_days <- function(data, participant = "", group = "") {
+  data <- filter_plot_data(data, participant = participant, group = group)
   sort(unique(as.character(as.Date(data$timestamp[!is.na(data$timestamp)]))))
 }
 
-plot_day_filter_choices <- function(data, participant = "", group = "", visit = "") {
-  filter_select_choices(available_plot_days(data, participant = participant, group = group, visit = visit), all_label = "All days")
+plot_day_filter_choices <- function(data, participant = "", group = "") {
+  filter_select_choices(available_plot_days(data, participant = participant, group = group), all_label = "All days")
 }
 
 is_finite_cgm_timestamp <- function(timestamp) {
@@ -202,7 +234,6 @@ plot_filtered_data <- function(
   plot_type = "trace",
   participant = "",
   group = "",
-  visit = "",
   day = ""
 ) {
   day <- if (identical(plot_type, "daily_overlay")) normalize_plot_days(day) else all_filter_value()
@@ -210,7 +241,6 @@ plot_filtered_data <- function(
     data,
     participant = participant,
     group = group,
-    visit = visit,
     day = day
   )
   filtered[is_finite_cgm_timestamp(filtered$timestamp), , drop = FALSE]
@@ -327,7 +357,6 @@ plot_download_filename <- function(
   plot_type = "trace",
   participant = "",
   group = "",
-  visit = "",
   day = ""
 ) {
   filtered <- plot_filtered_data(
@@ -335,7 +364,6 @@ plot_download_filename <- function(
     plot_type = plot_type,
     participant = participant,
     group = group,
-    visit = visit,
     day = day
   )
   date_span <- if (nrow(filtered)) {
@@ -348,7 +376,6 @@ plot_download_filename <- function(
     plot_type_filename_label(plot_type),
     plot_subject_filename_label(participant),
     plot_optional_filter_filename_label("group", group),
-    plot_optional_filter_filename_label("visit", visit),
     if (identical(plot_type, "daily_overlay")) plot_day_filename_label(day) else date_span
   )
   paste0(paste(parts[nzchar(parts)], collapse = "_"), ".png")
@@ -359,7 +386,6 @@ plot_download_filename <- function(
 #' @param data Standardized CGM data.
 #' @param participant Subject ID filter.
 #' @param group Group filter.
-#' @param visit Visit filter.
 #' @param day Date filter as `YYYY-MM-DD`.
 #'
 #' @return A data frame with time-of-day plotting columns.
@@ -368,11 +394,10 @@ prepare_time_of_day_plot_data <- function(
   data,
   participant = "",
   group = "",
-  visit = "",
   day = "",
   max_points_per_participant = Inf
 ) {
-  data <- filter_plot_data(data, participant = participant, group = group, visit = visit, day = day)
+  data <- filter_plot_data(data, participant = participant, group = group, day = day)
   data <- data[is_finite_cgm_timestamp(data$timestamp), , drop = FALSE]
   data <- prepare_plot_display_data(data, max_points_per_participant = max_points_per_participant)
   if (!nrow(data)) {
@@ -411,7 +436,6 @@ target_range_label <- function(thresholds) {
 #' @param thresholds Named glucose thresholds in mg/dL.
 #' @param participant Subject ID filter.
 #' @param group Group filter.
-#' @param visit Visit filter.
 #' @param day Date filter as `YYYY-MM-DD`.
 #'
 #' @return A ggplot object.
@@ -421,7 +445,6 @@ create_daily_overlay_plot <- function(
   thresholds = default_cgm_thresholds(),
   participant = "",
   group = "",
-  visit = "",
   day = "",
   max_points_per_participant = Inf,
   date_legend_limit = daily_overlay_date_legend_limit()
@@ -431,7 +454,6 @@ create_daily_overlay_plot <- function(
     data,
     participant = participant,
     group = group,
-    visit = visit,
     day = day,
     max_points_per_participant = max_points_per_participant
   )
@@ -470,10 +492,9 @@ prepare_agp_summary_data <- function(
   data,
   participant = "",
   group = "",
-  visit = "",
   bin_minutes = 30
 ) {
-  plot_data <- prepare_time_of_day_plot_data(data, participant = participant, group = group, visit = visit)
+  plot_data <- prepare_time_of_day_plot_data(data, participant = participant, group = group)
   plot_data <- plot_data[!is.na(plot_data$glucose) & !is.na(plot_data$time_minutes), , drop = FALSE]
   if (!nrow(plot_data)) {
     return(data.frame())
@@ -502,7 +523,6 @@ prepare_agp_summary_data <- function(
 #' @param thresholds Named glucose thresholds in mg/dL.
 #' @param participant Subject ID filter.
 #' @param group Group filter.
-#' @param visit Visit filter.
 #' @param bin_minutes Time-of-day bin width in minutes.
 #'
 #' @return A ggplot object.
@@ -512,14 +532,12 @@ create_agp_summary_plot <- function(
   thresholds = default_cgm_thresholds(),
   participant = "",
   group = "",
-  visit = "",
   bin_minutes = 30
 ) {
   agp <- prepare_agp_summary_data(
     data,
     participant = participant,
     group = group,
-    visit = visit,
     bin_minutes = bin_minutes
   )
   if (!nrow(agp)) {

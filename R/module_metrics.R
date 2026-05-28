@@ -9,8 +9,7 @@ metrics_module_ui <- function(id) {
     shiny::fluidRow(
       shiny::column(3, shiny::uiOutput(ns("participant_filter"))),
       shiny::column(3, shiny::uiOutput(ns("category_filter"))),
-      shiny::column(3, shiny::uiOutput(ns("group_filter"))),
-      shiny::column(3, shiny::uiOutput(ns("visit_filter")))
+      shiny::column(3, shiny::uiOutput(ns("group_filter")))
     ),
     shiny::uiOutput(ns("metrics_empty_state")),
     shinycssloaders::withSpinner(DT::DTOutput(ns("metrics_table")), type = 4)
@@ -186,26 +185,11 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
       )
     })
 
-    output$visit_filter <- shiny::renderUI({
-      display <- display_metrics()
-      if (!"Visit" %in% names(display) || length(clean_filter_values(display$Visit)) < 2L) {
-        return(NULL)
-      }
-      choices <- filter_select_choices(sort(unique(display$Visit)), all_label = "All")
-      shiny::selectInput(
-        session$ns("visit"),
-        "Visit",
-        choices = choices,
-        selected = preserve_filter_selection(input$visit, choices)
-      )
-    })
-
     card_display <- shiny::reactive({
       filter_metrics_display(
         display_metrics(),
         participant = input$participant %||% "",
         group = input$group %||% "",
-        visit = input$visit %||% "",
         include_category = FALSE
       )
     })

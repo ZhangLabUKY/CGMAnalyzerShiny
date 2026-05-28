@@ -1,10 +1,10 @@
 grouping_choices <- function(metrics) {
-  choices <- intersect(c("group", "visit"), names(metrics))
+  choices <- intersect("group", names(metrics))
   choices[vapply(choices, function(x) length(unique(stats::na.omit(metrics[[x]]))) >= 2L, logical(1))]
 }
 
 format_grouping_label <- function(grouping) {
-  labels <- c(group = "Group", visit = "Visit")
+  labels <- c(group = "Group")
   if (grouping %in% names(labels)) labels[[grouping]] else grouping
 }
 
@@ -36,7 +36,7 @@ insufficient_stat_result <- function(metric, grouping, test_type, groups = NA_ch
 
 #' Run a participant-level metric statistical test
 #'
-#' @param metrics Wide participant/visit-level metric data.
+#' @param metrics Wide subject-level metric data.
 #' @param metric Raw metric column name.
 #' @param grouping Grouping column name.
 #' @param test_type Either `welch_t` or `wilcoxon`.

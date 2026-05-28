@@ -25,13 +25,12 @@ test_that("data.table base metrics match legacy one-group summary", {
     )),
     glucose = c(60, 100, 150, 220),
     group = "Control",
-    visit = "Baseline",
     stringsAsFactors = FALSE
   )
   thresholds <- default_cgm_thresholds()
 
-  old <- summarize_one_metric_group(data, thresholds = thresholds, group_columns = c("id", "group", "visit"))
-  fast <- compute_base_metrics_dt(data, thresholds = thresholds, by = c("id", "group", "visit"))
+  old <- summarize_one_metric_group(data, thresholds = thresholds, group_columns = c("id", "group"))
+  fast <- compute_base_metrics_dt(data, thresholds = thresholds, by = c("id", "group"))
 
   expect_equal(fast[names(old)], old, tolerance = 1e-8)
 })

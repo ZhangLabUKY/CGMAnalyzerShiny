@@ -11,7 +11,6 @@ test_that("compute_qc_summary reports interval, duplicates, gaps, and implausibl
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     stringsAsFactors = FALSE
@@ -38,7 +37,6 @@ test_that("prepare_qc_display adds review status and notes", {
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     id_source = subject_id_source_mapped(),
@@ -56,7 +54,6 @@ test_that("prepare_qc_display adds review status and notes", {
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     id_source = subject_id_source_mapped(),
@@ -87,7 +84,6 @@ test_that("prepare_qc_display uses readable column labels without changing raw Q
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     id_source = subject_id_source_mapped(),
@@ -136,7 +132,6 @@ test_that("prepare_qc_display hides Subject ID for one filename-derived subject"
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = "OneFile.csv",
     imputed_flag = FALSE,
     id_source = subject_id_source_filename(),
@@ -161,7 +156,6 @@ test_that("duplicate timestamp note appears only when duplicates exist", {
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     id_source = subject_id_source_mapped(),
@@ -186,22 +180,39 @@ test_that("duplicate timestamp note appears only when duplicates exist", {
 
 test_that("quality calendar renders through dynamic output container", {
   html <- paste(as.character(qc_module_ui("qc")), collapse = "\n")
-  code <- paste(readLines(testthat::test_path("../../R/module_qc.R"), warn = FALSE), collapse = "\n")
+  data <- data.frame(
+    id = c("A", "A", "B"),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 08:00:00",
+      "2026-05-05 08:05:00",
+      "2026-05-06 08:00:00"
+    )),
+    glucose = c(100, NA, 120),
+    stringsAsFactors = FALSE
+  )
+  calendar <- compute_missingness_calendar_data(data)
+  dimensions <- missingness_calendar_dimensions(calendar, show_subject_id = TRUE)
 
   expect_true(grepl("qc-missingness_heatmap_ui", html, fixed = TRUE))
   expect_false(grepl("height=\"420px\"", html, fixed = TRUE))
-  expect_true(grepl("plotlyOutput", code, fixed = TRUE))
-  expect_true(grepl("\"missingness_heatmap\"", code, fixed = TRUE))
-  expect_true(grepl("missingness_calendar_dimensions", code, fixed = TRUE))
+  expect_true(nrow(calendar) >= 2L)
+  expect_true(is.numeric(dimensions$height))
+  expect_true(dimensions$height > 0)
 })
 
 test_that("quality imputation UI is rendered only when imputation is selected", {
   qc_html <- paste(as.character(qc_module_ui("qc")), collapse = "\n")
-  module_code <- paste(readLines(testthat::test_path("../../R/module_qc.R"), warn = FALSE), collapse = "\n")
+  off_settings <- create_reproducibility_settings(imputation_method = "none")
+  on_settings <- create_reproducibility_settings(imputation_method = "mice_only")
+  status <- summarize_imputation_status(
+    data.frame(id = "A", timestamp = parse_cgm_timestamp("2026-05-05 08:00:00"), glucose = NA_real_),
+    data.frame(id = "A", timestamp = parse_cgm_timestamp("2026-05-05 08:00:00"), glucose = 100, imputed_flag = TRUE),
+    on_settings
+  )
 
   expect_true(grepl("qc-imputation_status", qc_html, fixed = TRUE))
   expect_false(grepl(">Imputation Status<", qc_html, fixed = TRUE))
-  expect_true(grepl("if (!should_show_analysis_missingness(settings()))", module_code, fixed = TRUE))
-  expect_true(grepl("return(NULL)", module_code, fixed = TRUE))
-  expect_true(grepl("Backend", module_code, fixed = TRUE))
+  expect_false(should_show_analysis_missingness(off_settings))
+  expect_true(should_show_analysis_missingness(on_settings))
+  expect_true("Backend" %in% names(status))
 })

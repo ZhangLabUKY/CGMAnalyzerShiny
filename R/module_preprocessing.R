@@ -10,7 +10,17 @@ preprocessing_module_ui <- function(id) {
       shiny::column(2, shiny::numericInput(ns("valid_day_hours"), "Valid day hours", value = 14, min = 1, max = 24))
     ),
     shiny::fluidRow(
-      shiny::column(4, shiny::uiOutput(ns("analysis_date_range_ui")))
+      shiny::column(4, shiny::uiOutput(ns("analysis_date_range_ui"))),
+      shiny::column(
+        3,
+        shiny::numericInput(
+          ns("expected_study_duration_days"),
+          "Expected study duration days",
+          value = NA,
+          min = 1,
+          step = 1
+        )
+      )
     ),
     shiny::div(
       id = ns("imputation_panel"),
@@ -79,7 +89,10 @@ preprocessing_module_server <- function(id, mapping, standardized) {
         date_range <- normalize_analysis_date_range(input$analysis_date_range, standardized())
         filter_analysis_date_range(standardized(), date_range)
       }, shiny.silent.error = function(error) NULL, error = function(error) NULL)
-      imputation_summary_box_ui(imputation_missingness_summary(data))
+      imputation_summary_box_ui(imputation_missingness_summary(
+        data,
+        interval_minutes = input$imputation_interval_minutes %||% 5L
+      ))
     })
 
     output$imputation_options_ui <- shiny::renderUI({
@@ -94,6 +107,7 @@ preprocessing_module_server <- function(id, mapping, standardized) {
         tar_level2 = input$tar_level2
       )
       date_range <- normalize_analysis_date_range(input$analysis_date_range, standardized())
+      expected_duration_days <- normalize_expected_study_duration_days(input$expected_study_duration_days)
 
       create_reproducibility_settings(
         column_mapping = mapping(),
@@ -101,6 +115,7 @@ preprocessing_module_server <- function(id, mapping, standardized) {
         units = mapping()$source_units,
         valid_day_hours = input$valid_day_hours,
         analysis_date_range = date_range,
+        expected_study_duration_days = expected_duration_days,
         imputation_method = input$imputation,
         imputation_model = "mice_only",
         imputation_seed = input$imputation_seed %||% 42,

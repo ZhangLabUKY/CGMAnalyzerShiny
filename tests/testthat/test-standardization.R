@@ -84,7 +84,7 @@ test_that("standardize_cgm_data maps required and optional columns", {
     units = "mg/dL"
   )
 
-  expect_named(out, c("id", "id_source", "timestamp", "glucose", "units", "device", "group", "visit", "source_file", "imputed_flag"))
+  expect_named(out, c("id", "id_source", "timestamp", "glucose", "units", "device", "group", "source_file", "imputed_flag"))
   expect_equal(out$id, c("A", "A", "B"))
   expect_equal(unique(out$id_source), subject_id_source_mapped())
   expect_equal(out$group, c("Control", "Control", "Treatment"))
@@ -95,6 +95,7 @@ test_that("standardize_cgm_data maps required and optional columns", {
 test_that("example CGMissingDataR-style upload shape parses colon time and missing glucose", {
   raw <- data.frame(
     USUBJID = rep(c("11", "18"), each = 4),
+    SEX = rep(c("F", "M"), each = 4),
     LBORRES = c("150.0", "", "125.0", "132.0", "140.0", NA, "138.0", "137.0"),
     Time = c(
       "2020:01:16:00:00",
@@ -111,10 +112,11 @@ test_that("example CGMissingDataR-style upload shape parses colon time and missi
 
   out <- standardize_cgm_data(
     raw,
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES", group = "SEX")
   )
 
   expect_equal(subject_id_values(out), c("11", "18"))
+  expect_equal(unique(out$group), c("F", "M"))
   expect_equal(sum(is.na(out$timestamp)), 0)
   expect_equal(format_cgm_timestamp_iso(out$timestamp[[1L]]), "2020-01-16T00:00:00")
   expect_equal(sum(is.na(out$glucose)), 2)
@@ -154,7 +156,6 @@ test_that("standardize_cgm_data keeps optional columns empty when mappings are o
 
   expect_true(all(is.na(out$device)))
   expect_true(all(is.na(out$group)))
-  expect_true(all(is.na(out$visit)))
 })
 
 test_that("standardize_cgm_data still supports direct backend device mapping", {
@@ -199,6 +200,8 @@ test_that("read_cgm_file adds source file and filename-derived source id", {
 
   expect_equal(out$.source_file, "Patient-001.csv")
   expect_equal(out$.source_id, "Patient-001")
+  expect_equal(out$.import_header_row, 1L)
+  expect_equal(out$.import_first_data_row, 2L)
   expect_equal(derive_source_id("Patient-002.csv"), "Patient-002")
 })
 
@@ -267,8 +270,8 @@ test_that("multi-file standardization uses filename-derived participant ids", {
 test_that("multiple uploaded files combine while preserving source fields", {
   path_a <- tempfile(fileext = ".csv")
   path_b <- tempfile(fileext = ".csv")
-  writeLines(c("time,glucose,visit", "2026-05-05 08:00:00,100,Baseline"), path_a)
-  writeLines(c("time,glucose,visit", "2026-05-05 08:00:00,120,Baseline"), path_b)
+  writeLines(c("time,glucose,group", "2026-05-05 08:00:00,100,Control"), path_a)
+  writeLines(c("time,glucose,group", "2026-05-05 08:00:00,120,Treatment"), path_b)
 
   combined <- combine_uploaded_files(c(path_a, path_b), c("A.csv", "B.csv"))
 
@@ -278,13 +281,13 @@ test_that("multiple uploaded files combine while preserving source fields", {
 
   out <- standardize_cgm_data(
     combined,
-    mapping = list(timestamp = "time", glucose = "glucose", visit = "visit"),
+    mapping = list(timestamp = "time", glucose = "glucose", group = "group"),
     upload_mode = "multi_file"
   )
 
   expect_equal(out$id, c("A", "B"))
   expect_equal(out$id_source, c(subject_id_source_filename(), subject_id_source_filename()))
-  expect_equal(out$visit, c("Baseline", "Baseline"))
+  expect_equal(out$group, c("Control", "Treatment"))
 })
 
 test_that("subject id visibility helpers distinguish mapped and filename-derived ids", {

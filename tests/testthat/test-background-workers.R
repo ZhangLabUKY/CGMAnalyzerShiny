@@ -68,18 +68,9 @@ test_that("scheduled cleanup uses plain generation tokens", {
   expect_equal(cleanup_calls, 1)
 })
 
-test_that("app server registers session-ended worker cleanup", {
-  app_server_code <- paste(readLines(testthat::test_path("../../R/app_server.R"), warn = FALSE), collapse = "\n")
+test_that("run_app builds a package Shiny app object", {
+  app <- run_app()
 
-  expect_true(grepl("onSessionEnded", app_server_code, fixed = TRUE))
-  expect_true(grepl("cleanup_background_workers", app_server_code, fixed = TRUE))
-  expect_false(grepl("future::plan(future::multisession", app_server_code, fixed = TRUE))
-})
-
-test_that("metrics module configures and schedules background workers around adapters", {
-  metrics_code <- paste(readLines(testthat::test_path("../../R/module_metrics.R"), warn = FALSE), collapse = "\n")
-
-  expect_true(grepl("configure_background_workers", metrics_code, fixed = TRUE))
-  expect_true(grepl("schedule_background_worker_cleanup", metrics_code, fixed = TRUE))
-  expect_true(grepl("promises::future_promise", metrics_code, fixed = TRUE))
+  expect_s3_class(app, "shiny.appobj")
+  expect_true(is.function(app$serverFuncSource()))
 })

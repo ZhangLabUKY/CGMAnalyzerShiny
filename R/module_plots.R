@@ -2,7 +2,7 @@ plot_filter_layout_order <- function(plot_type = "trace") {
   if (identical(plot_type, "daily_overlay")) {
     c("day_filter", "subject_filter", "group_filter")
   } else {
-    c("subject_filter", "group_filter", "visit_filter")
+    c("subject_filter", "group_filter")
   }
 }
 
@@ -22,10 +22,7 @@ plot_filter_layout_ui <- function(ns, plot_type = "trace") {
       lapply(filters, function(filter_id) {
         shiny::column(3, shiny::uiOutput(ns(filter_id)))
       })
-    ),
-    if (identical(plot_type, "daily_overlay")) {
-      shiny::fluidRow(shiny::column(3, shiny::uiOutput(ns("visit_filter"))))
-    }
+    )
   )
 }
 
@@ -87,21 +84,6 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
       )
     })
 
-    output$visit_filter <- shiny::renderUI({
-      req_active_tab(active_tab, "plots")
-      data <- standardized()
-      if (!plot_filter_available(data, "visit", min_values = 2L)) {
-        return(NULL)
-      }
-      choices <- filter_select_choices(sort(unique(data$visit)), all_label = "All")
-      shiny::selectInput(
-        session$ns("visit"),
-        "Visit",
-        choices = choices,
-        selected = preserve_filter_selection(input$visit, choices)
-      )
-    })
-
     day_choices <- shiny::reactive({
       req_active_tab(active_tab, "plots")
       if (!identical(input$plot_type, "daily_overlay")) {
@@ -110,8 +92,7 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
       plot_day_filter_choices(
         standardized(),
         participant = input$participant,
-        group = input$group,
-        visit = input$visit
+        group = input$group
       )
     })
 
@@ -156,7 +137,7 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
       normalize_plot_days(day_selection())
     })
 
-    output$plot_summary <- shiny::renderUI({
+    plot_display_context <- shiny::reactive({
       req_active_tab(active_tab, "plots")
       plot_type <- input$plot_type %||% "trace"
       filtered <- plot_filtered_data(
@@ -164,11 +145,38 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
         plot_type = plot_type,
         participant = input$participant,
         group = input$group,
-        visit = input$visit,
         day = normalized_day()
       )
+      if (identical(plot_type, "agp")) {
+        return(list(
+          filtered = filtered,
+          max_points_per_participant = Inf,
+          displayed_rows = nrow(filtered),
+          optimized = FALSE
+        ))
+      }
+      max_points <- adaptive_plot_max_points_per_subject(filtered)
+      displayed_rows <- plot_display_row_count(filtered, max_points_per_participant = max_points)
+      list(
+        filtered = filtered,
+        max_points_per_participant = max_points,
+        displayed_rows = displayed_rows,
+        optimized = displayed_rows < nrow(filtered)
+      )
+    })
+
+    output$plot_summary <- shiny::renderUI({
+      req_active_tab(active_tab, "plots")
+      plot_type <- input$plot_type %||% "trace"
+      display_context <- plot_display_context()
+      filtered <- display_context$filtered
       note <- if (identical(plot_type, "daily_overlay")) {
         daily_overlay_legend_note(filtered)
+      } else {
+        ""
+      }
+      display_note <- if (isTRUE(display_context$optimized)) {
+        "Interactive plot optimized for display; analyses and data exports use full data."
       } else {
         ""
       }
@@ -179,13 +187,16 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
             plot_type = plot_type,
             participant = input$participant,
             group = input$group,
-            visit = input$visit,
-            day = normalized_day()
+            day = normalized_day(),
+            displayed_rows = display_context$displayed_rows
           ),
           compact = TRUE
         ),
         if (nzchar(note)) {
           shiny::div(class = "alert alert-info", note)
+        },
+        if (nzchar(display_note)) {
+          shiny::div(class = "alert alert-info", display_note)
         }
       )
     })
@@ -194,15 +205,15 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
       req_active_tab(active_tab, "plots")
       thresholds <- settings()$thresholds_mg_dl
       plot_type <- input$plot_type %||% "trace"
+      display_context <- plot_display_context()
       if (identical(plot_type, "daily_overlay")) {
         return(create_daily_overlay_plot(
           standardized(),
           thresholds = thresholds,
           participant = input$participant,
           group = input$group,
-          visit = input$visit,
           day = normalized_day(),
-          max_points_per_participant = Inf
+          max_points_per_participant = display_context$max_points_per_participant
         ))
       }
       if (identical(plot_type, "agp")) {
@@ -210,26 +221,28 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
           standardized(),
           thresholds = thresholds,
           participant = input$participant,
-          group = input$group,
-          visit = input$visit
+          group = input$group
         ))
       }
 
       data <- filter_plot_data(
         standardized(),
         participant = input$participant,
-        group = input$group,
-        visit = input$visit
+        group = input$group
       )
-      create_trace_plot(data, thresholds = thresholds, max_points_per_participant = Inf)
+      create_trace_plot(
+        data,
+        thresholds = thresholds,
+        max_points_per_participant = display_context$max_points_per_participant
+      )
     }),
     cgm_data_signature(standardized()),
     threshold_signature(settings()$thresholds_mg_dl),
     input$plot_type,
     input$participant,
     input$group,
-    input$visit,
-    plot_day_cache_key(normalized_day())
+    plot_day_cache_key(normalized_day()),
+    adaptive_plot_target_points()
     )
 
     output$active_plot <- plotly::renderPlotly({
@@ -247,7 +260,6 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
           plot_type = input$plot_type %||% "trace",
           participant = input$participant,
           group = input$group,
-          visit = input$visit,
           day = normalized_day()
         )
       },

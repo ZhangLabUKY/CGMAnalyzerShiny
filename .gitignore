@@ -1,16 +1,2 @@
 dev_notes/
-.Rproj.user/
-.Rhistory
-.RData
-.Ruserdata
-*.Rproj
-*.Rcheck/
-..Rcheck/
-dev_notes/..Rcheck/
-inst/doc
-doc
-Meta
-.DS_Store
-.Rproj.user
-.httr-oauth
-.quarto
+10.1177_19322968251353228.pdf

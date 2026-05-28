@@ -18,7 +18,8 @@ test_that("prepare_metrics_display returns readable long-format rows", {
   )
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
-  expect_true(all(c("Subject ID", "Group", "Visit", "Category", "Metric", "Definition", "Value", "Units") %in% names(display)))
+  expect_true(all(c("Subject ID", "Group", "Category", "Metric", "Definition", "Value", "Units") %in% names(display)))
+  expect_false("Visit" %in% names(display))
   expect_true(nrow(display) > 20)
   expect_true(all(c("Data Coverage", "Central Tendency", "Variability", "Time in Range", "Detailed Range Bands", "Risk", "Excursions") %in% display$Category))
   expect_true("Mean glucose" %in% display$Metric)
@@ -78,6 +79,17 @@ test_that("range metric labels include threshold context", {
   expect_true(any(grepl("70-180", labels, fixed = TRUE)))
   expect_true(any(grepl("<54", labels, fixed = TRUE)))
   expect_true(any(grepl(">250", labels, fixed = TRUE)))
+})
+
+test_that("CONGA display catalog uses 12 and 24 hour metrics", {
+  catalog <- metric_display_catalog()
+  conga <- catalog[grepl("^conga_", catalog$raw_name), , drop = FALSE]
+
+  expect_equal(conga$raw_name, c("conga_12h", "conga_24h"))
+  expect_equal(conga$metric, c("CONGA, 12 hour", "CONGA, 24 hour"))
+  expect_true(all(grepl("12 hours|24 hours", conga$definition)))
+  expect_false("conga_2h" %in% catalog$raw_name)
+  expect_false("CONGA, 2 hour" %in% catalog$metric)
 })
 
 test_that("range metric labels and definitions use current thresholds", {
@@ -188,7 +200,6 @@ test_that("All filter sentinel returns all metric display rows", {
     display,
     participant = all_filter_value(),
     group = all_filter_value(),
-    visit = all_filter_value(),
     category = all_filter_value()
   )
 

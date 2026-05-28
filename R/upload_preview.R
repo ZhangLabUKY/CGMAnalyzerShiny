@@ -15,7 +15,7 @@ preview_data_rows <- function(data, row_limit = "10") {
 }
 
 prepare_upload_preview_data <- function(data, upload_mode = "single_file") {
-  internal_source_cols <- intersect(c(".source_file", ".source_id"), names(data))
+  internal_source_cols <- intersect(internal_upload_source_columns(), names(data))
   preview <- data
 
   if (identical(upload_mode, "multi_file") && ".source_file" %in% names(preview)) {
@@ -47,7 +47,7 @@ uploaded_file_names <- function(uploaded) {
 }
 
 internal_upload_source_columns <- function() {
-  c(".source_file", ".source_id")
+  c(".source_file", ".source_id", ".import_header_row", ".import_first_data_row")
 }
 
 user_mapping_columns <- function(columns) {
@@ -68,7 +68,6 @@ mapping_choices_for_upload <- function(uploaded) {
     id = if (is_multi_file_upload(uploaded)) ".source_id" else "",
     timestamp = "",
     glucose = "",
-    group = "",
-    visit = ""
+    group = ""
   )
 }

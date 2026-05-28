@@ -2,7 +2,6 @@ synthetic_metric_data <- function() {
   data.frame(
     id = paste0("S", 1:8),
     group = rep(c("Control", "Treatment"), each = 4),
-    visit = "Baseline",
     mean_glucose = c(105, 110, 112, 108, 140, 145, 150, 142),
     tir_percent = c(92, 90, 88, 91, 75, 72, 70, 74),
     stringsAsFactors = FALSE

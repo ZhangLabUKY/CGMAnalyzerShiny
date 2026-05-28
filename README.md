@@ -1,3 +1,7 @@
+<!-- badges: start -->
+[![R-CMD-check](https://github.com/ZhangLabUKY/CGMAnalyzerShiny/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/ZhangLabUKY/CGMAnalyzerShiny/actions/workflows/R-CMD-check.yaml)
+<!-- badges: end -->
+
 # CGMAnalyzerShiny
 
 `CGMAnalyzerShiny` is a package-style Shiny application scaffold for continuous

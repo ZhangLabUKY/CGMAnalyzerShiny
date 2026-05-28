@@ -128,7 +128,6 @@ adapter_group_values <- function(x, group_columns) {
 #'
 #' @param data Standardized CGM data.
 #' @param by Grouping columns.
-#' @param conga_hours Lag in hours for CONGA.
 #' @param max_gap_intervals Maximum gap to interpolate during regularization.
 #'
 #' @return A data frame with CGManalyzer metric columns.
@@ -136,7 +135,6 @@ adapter_group_values <- function(x, group_columns) {
 compute_cgmanalyzer_metrics <- function(
   data,
   by = default_metric_groups(data),
-  conga_hours = 2,
   max_gap_intervals = 4
 ) {
   by <- by[by %in% names(data)]
@@ -152,7 +150,8 @@ compute_cgmanalyzer_metrics <- function(
     if (!installed) {
       return(data.frame(
         group_values,
-        conga_2h = NA_real_,
+        conga_12h = NA_real_,
+        conga_24h = NA_real_,
         modd = NA_real_,
         cgmanalyzer_status = "not_installed",
         stringsAsFactors = FALSE,
@@ -163,16 +162,20 @@ compute_cgmanalyzer_metrics <- function(
     regular <- regularize_cgm_series(x, max_gap_intervals = max_gap_intervals)
     interval <- attr(regular, "interval_minutes")
     y <- regular$glucose
-    enough_conga <- !is.na(interval) && sum(!is.na(y)) > (60 / interval * conga_hours)
+    conga_value <- function(hours) {
+      enough_conga <- !is.na(interval) && sum(!is.na(y)) > (60 / interval * hours)
+      if (enough_conga) {
+        safe_adapter_number(CGManalyzer::CONGA.fn(y, Interval = interval, n = hours))
+      } else {
+        NA_real_
+      }
+    }
     enough_modd <- !is.na(interval) && length(y) >= (2 * 24 * 60 / interval)
 
     data.frame(
       group_values,
-      conga_2h = if (enough_conga) {
-        safe_adapter_number(CGManalyzer::CONGA.fn(y, Interval = interval, n = conga_hours))
-      } else {
-        NA_real_
-      },
+      conga_12h = conga_value(12),
+      conga_24h = conga_value(24),
       modd = if (enough_modd) {
         safe_adapter_number(CGManalyzer::MODD.fn(y, Interval = interval / 60))
       } else {

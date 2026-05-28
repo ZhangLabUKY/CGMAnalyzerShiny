@@ -4,10 +4,13 @@ qc_module_ui <- function(id) {
       shiny::h3("Quality control"),
     shinycssloaders::withSpinner(shiny::uiOutput(ns("qc_summary_cards")), type = 4),
     shiny::uiOutput(ns("duplicate_timestamp_note")),
+    shiny::h4("Study window coverage"),
+    shinycssloaders::withSpinner(DT::DTOutput(ns("study_window_table")), type = 4),
     shiny::h4("Analysis data QC"),
     shinycssloaders::withSpinner(DT::DTOutput(ns("qc_table")), type = 4),
     shinycssloaders::withSpinner(shiny::uiOutput(ns("imputation_status")), type = 4),
     shiny::h4("Missingness Summary"),
+    shiny::uiOutput(ns("day_coverage_warning_note")),
     shinycssloaders::withSpinner(DT::DTOutput(ns("missingness_comparison_table")), type = 4),
     shiny::h4("Daily data coverage"),
     shiny::fluidRow(
@@ -39,13 +42,26 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
         standardized(),
         analysis_data(),
         valid_day_hours = settings()$valid_day_hours,
-        include_preprocessing = should_show_analysis_missingness(settings())
+        include_preprocessing = should_show_analysis_missingness(settings()),
+        interval_minutes = settings()$imputation_interval_minutes %||% 5L
       )
     }),
     cgm_data_signature(standardized()),
     cgm_data_signature(analysis_data()),
     settings()$valid_day_hours,
+    settings()$imputation_interval_minutes,
     should_show_analysis_missingness(settings())
+    )
+
+    study_window <- shiny::bindCache(shiny::reactive({
+      req_active_tab(active_tab, "quality")
+      study_window_summary(
+        analysis_data(),
+        expected_duration_days = settings()$expected_study_duration_days
+      )
+    }),
+    cgm_data_signature(analysis_data()),
+    expected_study_duration_signature(settings())
     )
 
     imputation_status <- shiny::bindCache(shiny::reactive({
@@ -59,9 +75,13 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
 
     gap_periods <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "quality")
-      detect_gap_periods(analysis_data())
+      detect_gap_periods(
+        analysis_data(),
+        interval_minutes = settings()$imputation_interval_minutes %||% 5L
+      )
     }),
-    cgm_data_signature(analysis_data())
+    cgm_data_signature(analysis_data()),
+    settings()$imputation_interval_minutes
     )
 
     missingness_calendar_data <- shiny::reactive({
@@ -78,7 +98,20 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
       compute_missingness_calendar_data(
         data,
         gaps = gaps,
-        date_range = settings()$analysis_date_range
+        date_range = settings()$analysis_date_range,
+        interval_minutes = settings()$imputation_interval_minutes %||% 5L
+      )
+    })
+
+    day_coverage_summary <- shiny::reactive({
+      day_coverage_warning_summary(missingness_calendar_data(), data = analysis_data())
+    })
+
+    missingness_comparison_display <- shiny::reactive({
+      append_day_coverage_warnings(
+        missingness_comparison(),
+        missingness_calendar_data(),
+        data = analysis_data()
       )
     })
 
@@ -102,7 +135,20 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
     })
 
     output$qc_summary_cards <- shiny::renderUI({
-      summary_card_ui(quality_summary_cards(analysis_data(), qc_summary(), missingness_comparison()), compact = TRUE)
+      summary_card_ui(
+        quality_summary_cards(
+          analysis_data(),
+          qc_summary(),
+          missingness_comparison_display(),
+          study_window = study_window(),
+          day_coverage = day_coverage_summary()
+        ),
+        compact = TRUE
+      )
+    })
+
+    output$study_window_table <- DT::renderDT({
+      DT::datatable(study_window(), rownames = FALSE, options = list(scrollX = FALSE, pageLength = 10))
     })
 
     output$duplicate_timestamp_note <- shiny::renderUI({
@@ -154,8 +200,8 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
             summary_card_ui(preprocessing_comparison_summary(status), compact = TRUE),
             shiny::tags$p(
               class = "help-block",
-              "Estimated missing readings from timestamp gaps are QC context only. ",
-              "This imputation workflow fills existing missing glucose rows and does not insert new timestamp rows."
+              "Inferred timestamp-gap readings are included in the imputation missing-rate review. ",
+              "When imputation is applied, generated gap rows are included in analysis data and exports."
             )
           )
         }
@@ -163,7 +209,18 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
     })
 
     output$missingness_comparison_table <- DT::renderDT({
-      DT::datatable(missingness_comparison(), rownames = FALSE, options = list(scrollX = FALSE, pageLength = 10))
+      DT::datatable(missingness_comparison_display(), rownames = FALSE, options = list(scrollX = FALSE, pageLength = 10))
+    })
+
+    output$day_coverage_warning_note <- shiny::renderUI({
+      note <- day_coverage_warning_note(day_coverage_summary())
+      if (!nzchar(note)) {
+        return(NULL)
+      }
+      shiny::div(
+        class = "alert alert-warning",
+        note
+      )
     })
 
     output$missingness_heatmap_ui <- shiny::renderUI({

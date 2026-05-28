@@ -40,8 +40,10 @@ test_that("CGManalyzer adapter computes vector-backed metrics", {
   metrics <- compute_cgmanalyzer_metrics(demo)
 
   expect_equal(nrow(metrics), 5)
-  expect_true(all(c("conga_2h", "modd", "cgmanalyzer_status") %in% names(metrics)))
-  expect_true(all(is.finite(metrics$conga_2h) | is.na(metrics$conga_2h)))
+  expect_true(all(c("conga_12h", "conga_24h", "modd", "cgmanalyzer_status") %in% names(metrics)))
+  expect_false("conga_2h" %in% names(metrics))
+  expect_true(all(is.finite(metrics$conga_12h) | is.na(metrics$conga_12h)))
+  expect_true(all(is.finite(metrics$conga_24h) | is.na(metrics$conga_24h)))
   expect_true(all(is.finite(metrics$modd) | is.na(metrics$modd)))
 })
 

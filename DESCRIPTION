@@ -13,7 +13,7 @@ Description: A modular Shiny application for continuous glucose monitoring
     analysis, uses iglu selectively for gaps or validation, and can use a
     current GitHub version of CGMissingDataR that exports
     run_missing_glucose_imputation() for missing glucose imputation workflows.
-License: MIT + file LICENSE
+License: GPL (>= 2)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3

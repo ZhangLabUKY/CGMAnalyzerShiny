@@ -5,21 +5,24 @@ test_that("bundled example datasets load with expected missingness", {
       file = "cgm_example_complete",
       rows = 500L,
       missing = 0L,
-      readings_per_subject = rep(100L, 5)
+      readings_per_subject = rep(100L, 5),
+      has_sex = FALSE
     ),
     missing_5pct = list(
       data = load_example_missing_5pct_cgm_data(),
       file = "CGMExmplDat5Pct",
       rows = 1440L,
       missing = 72L,
-      readings_per_subject = rep(288L, 5)
+      readings_per_subject = rep(288L, 5),
+      has_sex = TRUE
     ),
     missing_10pct = list(
       data = load_example_missing_10pct_cgm_data(),
       file = "CGMExmplDat10Pct",
       rows = 1440L,
       missing = 144L,
-      readings_per_subject = rep(288L, 5)
+      readings_per_subject = rep(288L, 5),
+      has_sex = TRUE
     )
   )
 
@@ -40,6 +43,12 @@ test_that("bundled example datasets load with expected missingness", {
     expect_equal(length(unique(example$data$USUBJID)), 5)
     expect_equal(unique(example$data$.source_id), example$file)
     expect_equal(sum(is.na(example$data$LBORRES)), example$missing)
+    if (example$has_sex) {
+      expect_true("SEX" %in% names(example$data))
+      expect_setequal(unique(example$data$SEX), c("F", "M"))
+    } else {
+      expect_false("SEX" %in% names(example$data))
+    }
   }
 })
 
@@ -67,8 +76,26 @@ test_that("bundled examples standardize with colon timestamps and expected missi
     expect_equal(qc$median_interval_minutes, rep(5, 5))
     expect_equal(nrow(metrics), 5)
     expect_true(all(
-      c("conga_2h", "modd", "lbgi", "hbgi", "j_index", "mage") %in%
+      c("conga_12h", "conga_24h", "modd", "lbgi", "hbgi", "j_index", "mage") %in%
         names(metrics)
     ))
+    expect_false("conga_2h" %in% names(metrics))
+  }
+})
+
+test_that("missingness examples can map SEX as optional group metadata", {
+  examples <- list(
+    load_example_missing_5pct_cgm_data(),
+    load_example_missing_10pct_cgm_data()
+  )
+
+  for (example in examples) {
+    standardized <- standardize_cgm_data(
+      example,
+      mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES", group = "SEX")
+    )
+
+    expect_true("group" %in% names(standardized))
+    expect_setequal(unique(standardized$group), c("F", "M"))
   }
 })

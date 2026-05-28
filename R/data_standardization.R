@@ -3,7 +3,7 @@ required_cgm_columns <- function() {
 }
 
 optional_cgm_columns <- function() {
-  c("device", "group", "visit")
+  c("device", "group")
 }
 
 clean_mapping_value <- function(x) {
@@ -321,8 +321,8 @@ convert_glucose_to_mg_dl <- function(glucose, units) {
 #' Standardize uploaded CGM data
 #'
 #' @param data Input data frame.
-#' @param mapping Named list with id, timestamp, glucose, and optional device,
-#'   group, and visit entries.
+#' @param mapping Named list with id, timestamp, glucose, and optional device
+#'   and group entries.
 #' @param units Source glucose units, either mg/dL or mmol/L.
 #' @param source_file Optional source file label.
 #' @param tz Time zone used for timestamp parsing.
@@ -360,7 +360,6 @@ standardize_cgm_data <- function(
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = source_file,
     imputed_flag = FALSE,
     stringsAsFactors = FALSE
@@ -382,11 +381,22 @@ standardize_cgm_data <- function(
   out
 }
 
-read_cgm_file <- function(datapath, filename) {
+read_cgm_file <- function(datapath, filename, header_row = 1L, first_data_row = NULL) {
   ext <- tolower(tools::file_ext(filename))
+  header_row <- suppressWarnings(as.integer(header_row %||% 1L))
+  if (is.na(header_row) || header_row < 1L) {
+    header_row <- 1L
+  }
+  first_data_row <- normalize_first_data_row(header_row, first_data_row %||% (header_row + 1L))
+  skip_rows <- header_row - 1L
+  drop_after_header <- first_data_row - header_row - 1L
   if (ext %in% c("csv", "txt")) {
     data <- data.table::fread(
       datapath,
+      sep = cgm_fread_separator(filename),
+      skip = skip_rows,
+      header = TRUE,
+      fill = TRUE,
       data.table = FALSE,
       showProgress = FALSE
     )
@@ -394,19 +404,42 @@ read_cgm_file <- function(datapath, filename) {
     if (!requireNamespace("readxl", quietly = TRUE)) {
       stop("Package 'readxl' is required to read Excel files.", call. = FALSE)
     }
-    data <- readxl::read_excel(datapath)
+    data <- readxl::read_excel(
+      datapath,
+      skip = skip_rows,
+      col_names = TRUE,
+      .name_repair = "minimal"
+    )
   } else {
     stop("Unsupported file type: ", ext, call. = FALSE)
   }
 
   data <- as.data.frame(data, stringsAsFactors = FALSE)
+  if (drop_after_header > 0L && nrow(data) >= drop_after_header) {
+    data <- data[-seq_len(drop_after_header), , drop = FALSE]
+  }
+  names(data) <- clean_import_column_names(names(data))
   data[[".source_file"]] <- filename
   data[[".source_id"]] <- derive_source_id(filename)
+  data[[".import_header_row"]] <- header_row
+  data[[".import_first_data_row"]] <- first_data_row
   data
 }
 
-combine_uploaded_files <- function(datapaths, filenames) {
-  data_list <- Map(read_cgm_file, datapaths, filenames)
+combine_uploaded_files <- function(datapaths, filenames, header_rows = NULL, first_data_rows = NULL) {
+  if (is.null(header_rows)) {
+    header_rows <- rep(1L, length(datapaths))
+  }
+  if (is.null(first_data_rows)) {
+    first_data_rows <- header_rows + 1L
+  }
+  data_list <- Map(read_cgm_file, datapaths, filenames, header_rows, first_data_rows)
+  if (!compatible_uploaded_schemas(data_list)) {
+    stop(
+      "Uploaded files use different resolved column names. Review header rows or upload one device/schema group at a time.",
+      call. = FALSE
+    )
+  }
   combined <- dplyr::bind_rows(lapply(data_list, function(x) {
     x[] <- lapply(x, as.character)
     x

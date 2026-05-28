@@ -18,6 +18,10 @@ column_mapping_module_ui <- function(id) {
           selected = "mg/dL",
           inline = TRUE
         )
+      ),
+      shiny::column(
+        4,
+        shiny::uiOutput(ns("group_mapping_ui"))
       )
     ),
     shiny::uiOutput(ns("mapping_status"))
@@ -72,6 +76,16 @@ column_mapping_module_server <- function(id, uploaded) {
       shiny::selectInput(session$ns("glucose_col"), "Glucose", choices = choices$required_choices, selected = "")
     })
 
+    output$group_mapping_ui <- shiny::renderUI({
+      choices <- mapping_choices_for_upload(uploaded())
+      shiny::selectInput(
+        session$ns("group_col"),
+        "Group / metadata (optional)",
+        choices = choices$optional_choices,
+        selected = ""
+      )
+    })
+
     mapping <- shiny::reactive({
       upload <- uploaded()
       upload_mode <- upload$upload_mode %||% "single_file"
@@ -79,8 +93,7 @@ column_mapping_module_server <- function(id, uploaded) {
         id = if (identical(upload_mode, "multi_file")) ".source_id" else input$id_col,
         timestamp = input$timestamp_col,
         glucose = input$glucose_col,
-        group = "",
-        visit = "",
+        group = input$group_col,
         device = "",
         source_units = input$source_units,
         upload_mode = upload_mode
@@ -91,6 +104,12 @@ column_mapping_module_server <- function(id, uploaded) {
       map <- mapping()
       upload <- uploaded()
       id_label <- subject_id_status_value(upload, map$id)
+      group_label <- clean_mapping_value(map$group)
+      group_status <- if (!is.na(group_label)) {
+        paste("| Group =", group_label)
+      } else {
+        ""
+      }
       shiny::tags$p(
         style = "margin-top: 8px; color: #555;",
         paste(
@@ -98,6 +117,7 @@ column_mapping_module_server <- function(id, uploaded) {
           "Subject ID =", id_label,
           "| Timestamp =", map$timestamp %||% "",
           "| Glucose =", map$glucose %||% "",
+          group_status,
           "| Units =", map$source_units %||% "mg/dL"
         )
       )

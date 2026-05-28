@@ -11,7 +11,6 @@ missingness_fixture <- function() {
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     id_source = subject_id_source_mapped(),
@@ -25,9 +24,10 @@ test_that("canonical missingness example fixture has intentional missing values 
   expect_equal(nrow(standardized), 46)
   expect_equal(sum(is.na(standardized$glucose)), 2)
 
-  summary <- compute_missingness_summary(standardized, valid_day_hours = 14)
-  expect_equal(summary$missing_glucose, c(1, 1))
-  expect_equal(summary$missing_glucose_rate, c(round(100 / 22, 2), round(100 / 24, 2)))
+  summary <- compute_missingness_summary(standardized, valid_day_hours = 14, interval_minutes = 60)
+  expect_equal(summary$missing_glucose, c(3, 1))
+  expect_equal(summary$missing_glucose_rate, c(round(100 * 3 / 24, 2), round(100 / 24, 2)))
+  expect_equal(summary$explicit_missing_glucose, c(1, 1))
   expect_equal(summary$gap_count, c(1, 0))
   expect_equal(summary$estimated_missing_readings, c(2, 0))
 })
@@ -45,17 +45,62 @@ test_that("detect_gap_periods reports known timestamp gaps", {
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     stringsAsFactors = FALSE
   )
 
-  gaps <- detect_gap_periods(data)
+  gaps <- detect_gap_periods(data, interval_minutes = 60)
   expect_equal(nrow(gaps), 1)
-  expect_equal(gaps$gap_minutes, 180)
+  expect_equal(gaps$gap_minutes, 120)
   expect_equal(gaps$expected_interval_minutes, 60)
   expect_equal(gaps$estimated_missing_readings, 2)
+})
+
+test_that("grid missingness snaps off-grid timestamps and keeps non-missing duplicates", {
+  data <- data.frame(
+    id = c("A", "A", "A", "A"),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 00:00:00",
+      "2026-05-05 00:04:00",
+      "2026-05-05 00:06:00",
+      "2026-05-05 00:15:00"
+    )),
+    glucose = c(100, NA, 115, 130),
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  expanded <- regularize_cgm_timestamp_grid(data, interval_minutes = 5)
+  summary <- missingness_grid_summary_by_id(data, interval_minutes = 5)
+
+  expect_equal(format(expanded$timestamp, "%H:%M:%S"), c("00:00:00", "00:05:00", "00:10:00", "00:15:00"))
+  expect_equal(expanded$glucose[expanded$timestamp == parse_cgm_timestamp("2026-05-05 00:05:00")], 115)
+  expect_equal(summary$estimated_missing_readings, 1)
+  expect_equal(summary$missing_glucose, 1)
+  expect_equal(summary$missing_glucose_rate, 25)
+})
+
+test_that("grid missingness handles explicit NA rows and staggered subject starts", {
+  data <- data.frame(
+    id = c("A", "A", "B", "B"),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 00:00:00",
+      "2026-05-05 00:15:00",
+      "2026-05-06 12:00:00",
+      "2026-05-06 12:10:00"
+    )),
+    glucose = c(100, 130, NA, 145),
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  summary <- missingness_grid_summary_by_id(data, interval_minutes = 5)
+
+  expect_equal(summary$expanded_rows[summary$id == "A"], 4)
+  expect_equal(summary$estimated_missing_readings[summary$id == "A"], 2)
+  expect_equal(summary$explicit_missing_glucose[summary$id == "B"], 1)
+  expect_equal(summary$expanded_rows[summary$id == "B"], 3)
 })
 
 test_that("missingness plot helpers return expected plot types", {
@@ -69,7 +114,7 @@ test_that("missingness plot helpers return expected plot types", {
 test_that("missingness heatmap data is participant-day aggregated", {
   standardized <- missingness_fixture()
 
-  heatmap <- compute_missingness_heatmap_data(standardized)
+  heatmap <- compute_missingness_heatmap_data(standardized, interval_minutes = 60)
 
   expect_lt(nrow(heatmap), nrow(standardized))
   expect_true(all(c(
@@ -83,7 +128,7 @@ test_that("missingness heatmap data is participant-day aggregated", {
     "imputed_rows",
     "tooltip"
   ) %in% names(heatmap)))
-  expect_equal(sum(heatmap$missing_glucose), 2)
+  expect_equal(sum(heatmap$missing_glucose), 4)
   expect_equal(sum(heatmap$timestamp_gaps), 1)
   expect_equal(sum(heatmap$estimated_missing_readings), 2)
 })
@@ -103,13 +148,12 @@ test_that("daily coverage calendar includes no-data days and coverage details", 
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = c(FALSE, FALSE, TRUE, FALSE, FALSE, FALSE),
     stringsAsFactors = FALSE
   )
 
-  calendar <- compute_missingness_calendar_data(data)
+  calendar <- compute_missingness_calendar_data(data, interval_minutes = 60)
   no_data <- calendar[calendar$date == as.Date("2026-05-05"), , drop = FALSE]
   may_4 <- calendar[calendar$date == as.Date("2026-05-04"), , drop = FALSE]
 
@@ -119,8 +163,8 @@ test_that("daily coverage calendar includes no-data days and coverage details", 
   expect_equal(may_4$expected_readings, 24)
   expect_equal(may_4$coverage_percent, 12.5)
   expect_equal(as.character(may_4$coverage_status), "Low coverage (<50%)")
-  expect_equal(may_4$missing_glucose, 1)
-  expect_equal(may_4$missing_glucose_rate, round(100 / 3, 2))
+  expect_equal(may_4$missing_glucose, 22)
+  expect_equal(may_4$missing_glucose_rate, round(100 * 22 / 24, 2))
   expect_true(any(grepl("Status: Low coverage (<50%)", calendar$tooltip, fixed = TRUE)))
   expect_true(all(grepl("Readings:", calendar$tooltip, fixed = TRUE)))
   expect_true(all(grepl("Expected readings:", calendar$tooltip, fixed = TRUE)))
@@ -141,14 +185,13 @@ test_that("daily coverage calendar uses subject active date spans", {
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     id_source = subject_id_source_mapped(),
     stringsAsFactors = FALSE
   )
 
-  calendar <- compute_missingness_calendar_data(data)
+  calendar <- compute_missingness_calendar_data(data, interval_minutes = 60)
   a_dates <- calendar$date[calendar$id == "A"]
   b_dates <- calendar$date[calendar$id == "B"]
 
@@ -179,14 +222,13 @@ test_that("daily coverage month ticks use compact chronological positions", {
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     id_source = subject_id_source_mapped(),
     stringsAsFactors = FALSE
   )
 
-  calendar <- compute_missingness_calendar_data(data)
+  calendar <- compute_missingness_calendar_data(data, interval_minutes = 60)
   ticks <- missingness_calendar_month_ticks(calendar)
 
   expect_equal(as.character(ticks$month), c("Jan 2026", "May 2026"))
@@ -248,7 +290,6 @@ test_that("daily coverage plot filters subject before calendar expansion", {
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     id_source = subject_id_source_mapped(),
@@ -280,13 +321,12 @@ test_that("daily coverage is capped at 100 percent", {
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     stringsAsFactors = FALSE
   )
 
-  calendar <- compute_missingness_calendar_data(data)
+  calendar <- compute_missingness_calendar_data(data, interval_minutes = 60)
 
   expect_equal(calendar$expected_readings, 24)
   expect_equal(calendar$coverage_percent, 100)
@@ -317,6 +357,47 @@ test_that("daily coverage labels include explicit thresholds", {
   expect_false(any(is.na(coverage_status_color(status))))
 })
 
+test_that("day coverage warnings count full and half-day missingness per subject", {
+  data <- data.frame(
+    id = c(
+      rep("A", 24),
+      rep("A", 11),
+      rep("B", 24)
+    ),
+    id_source = subject_id_source_mapped(),
+    timestamp = c(
+      parse_cgm_timestamp(c(
+        format(parse_cgm_timestamp("2026-05-01 00:00:00") + seq(0, by = 3600, length.out = 24), "%Y-%m-%d %H:%M:%S")
+      )),
+      parse_cgm_timestamp("2026-05-03 00:00:00") + seq(0, by = 3600, length.out = 11),
+      parse_cgm_timestamp("2026-06-01 00:00:00") + seq(0, by = 3600, length.out = 24)
+    ),
+    glucose = 100,
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  calendar <- compute_missingness_calendar_data(data, interval_minutes = 60)
+  warnings <- day_coverage_warning_summary(calendar, data = data)
+  comparison <- append_day_coverage_warnings(
+    compare_missingness_summaries(data, data, interval_minutes = 60),
+    calendar,
+    data = data
+  )
+  note <- day_coverage_warning_note(warnings)
+
+  expect_equal(warnings[["Full missing days"]][warnings[["Subject ID"]] == "A"], 1L)
+  expect_equal(warnings[["Half-day or worse coverage days"]][warnings[["Subject ID"]] == "A"], 1L)
+  expect_equal(warnings[["Full missing days"]][warnings[["Subject ID"]] == "B"], 0L)
+  expect_true(all(c("Full missing days", "Half-day or worse coverage days") %in% names(comparison)))
+  expect_true(grepl("full missing day", note, fixed = TRUE))
+  expect_true(grepl("less than half", note, fixed = TRUE))
+})
+
 test_that("daily coverage calendar uses fixed-color plotly traces without colorscales", {
   standardized <- missingness_fixture()
 
@@ -338,7 +419,6 @@ test_that("daily coverage plotly layout uses dynamic calendar dimensions", {
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = NA_character_,
     imputed_flag = FALSE,
     id_source = subject_id_source_mapped(),
@@ -357,17 +437,31 @@ test_that("daily coverage plotly layout uses dynamic calendar dimensions", {
 
 test_that("missingness comparison reports original and analysis data counts", {
   standardized <- missingness_fixture()
-  fake_result <- data.frame(
+  fake_result <- rbind(
+    data.frame(
     .row_id = seq_len(nrow(standardized)),
+      subject_index = as.integer(factor(standardized$id, levels = unique(standardized$id))),
+      time = format_cgm_timestamp_iso(standardized$timestamp, tz = "UTC"),
     glucose = standardized$glucose,
     imputed_glucose_value = ifelse(is.na(standardized$glucose), 123, standardized$glucose),
     imputation_method = "MICE+ARIMA",
-    missing_rate = mean(is.na(standardized$glucose)),
+      missing_rate = 4 / 48,
     stringsAsFactors = FALSE
+    ),
+    data.frame(
+      .row_id = c(NA_integer_, NA_integer_),
+      subject_index = c(1L, 1L),
+      time = c("2026-05-01T14:00:00", "2026-05-01T15:00:00"),
+      glucose = c(NA_real_, NA_real_),
+      imputed_glucose_value = c(123, 123),
+      imputation_method = "MICE+ARIMA",
+      missing_rate = 4 / 48,
+      stringsAsFactors = FALSE
+    )
   )
   analysis <- apply_imputed_glucose(standardized, fake_result)
 
-  comparison <- compare_missingness_summaries(standardized, analysis, valid_day_hours = 14)
+  comparison <- compare_missingness_summaries(standardized, analysis, valid_day_hours = 14, interval_minutes = 60)
 
   expect_equal(comparison[["Subject ID"]], c("GAP001", "GAP002"))
   expect_equal(
@@ -389,7 +483,8 @@ test_that("missingness comparison reports original and analysis data counts", {
     standardized,
     analysis,
     valid_day_hours = 14,
-    include_preprocessing = TRUE
+    include_preprocessing = TRUE,
+    interval_minutes = 60
   )
   expect_equal(
     names(comparison_with_imputation),
@@ -405,9 +500,9 @@ test_that("missingness comparison reports original and analysis data counts", {
       "Valid days"
     )
   )
-  expect_equal(comparison_with_imputation[["Missing glucose rows before preprocessing"]], c(1, 1))
+  expect_equal(comparison_with_imputation[["Missing glucose rows before preprocessing"]], c(3, 1))
   expect_equal(comparison_with_imputation[["Missing glucose rows after preprocessing"]], c(0, 0))
-  expect_equal(comparison_with_imputation[["Filled glucose rows"]], c(1, 1))
+  expect_equal(comparison_with_imputation[["Filled glucose rows"]], c(3, 1))
   expect_equal(comparison_with_imputation[["Timestamp gaps"]], c(1, 0))
   expect_equal(comparison_with_imputation[["Estimated missing readings from gaps"]], c(2, 0))
 })
@@ -421,7 +516,6 @@ test_that("missingness comparison hides Subject ID for one filename-derived subj
     units = "mg/dL",
     device = NA_character_,
     group = NA_character_,
-    visit = NA_character_,
     source_file = "FallbackA.csv",
     imputed_flag = FALSE,
     stringsAsFactors = FALSE
@@ -439,35 +533,76 @@ test_that("analysis missingness table visibility follows imputation setting", {
 
 test_that("imputation status reports off, unavailable, no-missing, and applied states", {
   standardized <- missingness_fixture()
-  complete <- standardized
+  complete <- regularize_cgm_timestamp_grid(standardized, interval_minutes = 60)
   complete$glucose[is.na(complete$glucose)] <- 120
-  fake_result <- data.frame(
-    .row_id = seq_len(nrow(standardized)),
-    glucose = standardized$glucose,
-    imputed_glucose_value = ifelse(is.na(standardized$glucose), 123, standardized$glucose),
-    imputation_method = "MICE+ARIMA",
-    missing_rate = mean(is.na(standardized$glucose)),
-    stringsAsFactors = FALSE
+  fake_result <- rbind(
+    data.frame(
+      .row_id = seq_len(nrow(standardized)),
+      subject_index = as.integer(factor(standardized$id, levels = unique(standardized$id))),
+      time = format_cgm_timestamp_iso(standardized$timestamp, tz = "UTC"),
+      glucose = standardized$glucose,
+      imputed_glucose_value = ifelse(is.na(standardized$glucose), 123, standardized$glucose),
+      imputation_method = "MICE+ARIMA",
+      missing_rate = 4 / 48,
+      stringsAsFactors = FALSE
+    ),
+    data.frame(
+      .row_id = c(NA_integer_, NA_integer_),
+      subject_index = c(1L, 1L),
+      time = c("2026-05-01T14:00:00", "2026-05-01T15:00:00"),
+      glucose = c(NA_real_, NA_real_),
+      imputed_glucose_value = c(123, 123),
+      imputation_method = "MICE+ARIMA",
+      missing_rate = 4 / 48,
+      stringsAsFactors = FALSE
+    )
   )
   analysis <- apply_imputed_glucose(standardized, fake_result)
+  gap_only <- data.frame(
+    id = "A",
+    id_source = subject_id_source_mapped(),
+    timestamp = parse_cgm_timestamp(c("2026-05-01 00:00:00", "2026-05-01 00:10:00")),
+    glucose = c(100, 120),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+  no_fill_result <- data.frame(
+    .row_id = c(1L, NA_integer_, 2L),
+    subject_index = c(1L, 1L, 1L),
+    time = c("2026-05-01T00:00:00", "2026-05-01T00:05:00", "2026-05-01T00:10:00"),
+    glucose = c(100, NA, 120),
+    imputed_glucose_value = c(100, NA, 120),
+    imputation_method = "MICE+ARIMA",
+    missing_rate = 1 / 3,
+    stringsAsFactors = FALSE
+  )
+  no_fill_analysis <- apply_imputed_glucose(gap_only, no_fill_result)
 
-  off <- summarize_imputation_status(standardized, standardized, list(imputation_method = "none", imputation_available = TRUE))
-  unavailable <- summarize_imputation_status(standardized, standardized, list(imputation_method = "mice_only", imputation_available = FALSE))
-  not_needed <- summarize_imputation_status(complete, complete, list(imputation_method = "mice_only", imputation_available = TRUE))
-  applied <- summarize_imputation_status(standardized, analysis, list(imputation_method = "mice_only", imputation_available = TRUE, imputation_seed = 42))
+  off <- summarize_imputation_status(standardized, standardized, list(imputation_method = "none", imputation_available = TRUE, imputation_interval_minutes = 60))
+  unavailable <- summarize_imputation_status(standardized, standardized, list(imputation_method = "mice_only", imputation_available = FALSE, imputation_interval_minutes = 60))
+  not_needed <- summarize_imputation_status(complete, complete, list(imputation_method = "mice_only", imputation_available = TRUE, imputation_interval_minutes = 60))
+  applied <- summarize_imputation_status(standardized, analysis, list(imputation_method = "mice_only", imputation_available = TRUE, imputation_seed = 42, imputation_interval_minutes = 60))
   failed <- standardized
   attr(failed, "imputation_error") <- "Python dependency unavailable"
-  could_not_apply <- summarize_imputation_status(standardized, failed, list(imputation_method = "mice_only", imputation_available = TRUE, imputation_backend = "sklearn"))
+  could_not_apply <- summarize_imputation_status(standardized, failed, list(imputation_method = "mice_only", imputation_available = TRUE, imputation_backend = "sklearn", imputation_interval_minutes = 60))
+  no_rows_filled <- summarize_imputation_status(gap_only, no_fill_analysis, list(imputation_method = "mice_only", imputation_available = TRUE, imputation_interval_minutes = 5))
 
   expect_equal(off$Status, "Not applied")
   expect_equal(unavailable$Status, "Unavailable")
   expect_equal(not_needed$Status, "Not needed")
   expect_equal(applied$Status, "Applied")
   expect_equal(could_not_apply$Status, "Could not apply")
+  expect_equal(no_rows_filled$Status, "No rows filled")
   expect_equal(could_not_apply$Backend, "Python/sklearn")
-  expect_equal(applied[["Filled glucose rows"]], 2)
-  expect_equal(applied[["Original missing glucose"]], 2)
-  expect_equal(applied[["Original missing glucose (%)"]], round(100 * 2 / nrow(standardized), 2))
+  expect_true(grepl("Python dependency unavailable", could_not_apply$Message, fixed = TRUE))
+  expect_true(grepl("returned no finite imputed glucose", no_rows_filled$Message, fixed = TRUE))
+  expect_equal(applied[["Filled glucose rows"]], 4)
+  expect_equal(applied[["Original missing glucose"]], 4)
+  expect_equal(applied[["Original missing glucose (%)"]], round(100 * 4 / 48, 2))
   expect_equal(applied[["Analysis missing glucose"]], 0)
   expect_equal(applied[["Analysis missing glucose (%)"]], 0)
   expect_equal(applied[["Estimated missing readings from gaps"]], 2)

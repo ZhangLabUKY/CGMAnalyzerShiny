@@ -1,5 +1,5 @@
 default_metric_groups <- function(data) {
-  groups <- c("id", "id_source", "group", "visit")
+  groups <- c("id", "id_source", "group")
   groups[groups %in% names(data)]
 }
 
