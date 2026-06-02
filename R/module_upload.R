@@ -70,7 +70,11 @@ upload_module_server <- function(id) {
       if (is.null(files) || !nrow(files)) {
         return(list())
       }
-      Map(probe_cgm_file_import, files$datapath, files$name)
+      cgm_timed(
+        "upload_probe_files",
+        Map(probe_cgm_file_import, files$datapath, files$name),
+        rows = nrow(files)
+      )
     })
 
     uploaded <- shiny::reactive({
@@ -80,11 +84,15 @@ upload_module_server <- function(id) {
         row_boundaries <- selected_import_row_boundaries(probes, input)
         upload_mode <- if (nrow(files) > 1L) "multi_file" else "single_file"
         combined <- tryCatch(
-          combine_uploaded_files(
-            files$datapath,
-            files$name,
-            header_rows = row_boundaries$header_row,
-            first_data_rows = row_boundaries$first_data_row
+          cgm_timed(
+            "upload_read_combine",
+            combine_uploaded_files(
+              files$datapath,
+              files$name,
+              header_rows = row_boundaries$header_row,
+              first_data_rows = row_boundaries$first_data_row
+            ),
+            context = list(files = nrow(files), upload_mode = upload_mode)
           ),
           error = function(error) {
             return(structure(
@@ -123,19 +131,19 @@ upload_module_server <- function(id) {
       switch(
         example,
         complete = list(
-          data = load_example_complete_cgm_data(),
+          data = cgm_timed("upload_load_example_complete", load_example_complete_cgm_data()),
           files = "cgm_example_complete.csv",
           demo = TRUE,
           upload_mode = "single_file"
         ),
         missing_5pct = list(
-          data = load_example_missing_5pct_cgm_data(),
+          data = cgm_timed("upload_load_example_5pct", load_example_missing_5pct_cgm_data()),
           files = "CGMExmplDat5Pct",
           demo = TRUE,
           upload_mode = "single_file"
         ),
         missing_10pct = list(
-          data = load_example_missing_10pct_cgm_data(),
+          data = cgm_timed("upload_load_example_10pct", load_example_missing_10pct_cgm_data()),
           files = "CGMExmplDat10Pct",
           demo = TRUE,
           upload_mode = "single_file"
@@ -195,20 +203,26 @@ upload_module_server <- function(id) {
 
     output$preview <- DT::renderDT({
       upload <- uploaded()
-      data <- prepare_upload_preview_data(
-        upload$data,
-        upload$upload_mode %||% "single_file"
-      )
-      preview <- preview_data_rows(data, input$preview_rows %||% "10")
+      preview <- cgm_timed("upload_preview_prepare", {
+        data <- prepare_upload_preview_data(
+          upload$data,
+          upload$upload_mode %||% "single_file"
+        )
+        preview_data_rows(data, input$preview_rows %||% "10")
+      })
       page_length <- if (identical(input$preview_rows, "all")) {
         100L
       } else {
         nrow(preview)
       }
-      DT::datatable(
-        preview,
-        rownames = FALSE,
-        options = preview_dt_options(page_length = page_length)
+      cgm_timed(
+        "upload_preview_dt_render",
+        DT::datatable(
+          preview,
+          rownames = FALSE,
+          options = preview_dt_options(page_length = page_length)
+        ),
+        rows = nrow(preview)
       )
     })
 

@@ -83,7 +83,7 @@ test_that("bundled examples standardize with colon timestamps and expected missi
   }
 })
 
-test_that("missingness examples can map SEX as optional group metadata", {
+test_that("missingness examples can prefill SEX as subject metadata", {
   examples <- list(
     load_example_missing_5pct_cgm_data(),
     load_example_missing_10pct_cgm_data()
@@ -92,10 +92,19 @@ test_that("missingness examples can map SEX as optional group metadata", {
   for (example in examples) {
     standardized <- standardize_cgm_data(
       example,
-      mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES", group = "SEX")
+      mapping = list(
+        id = "USUBJID",
+        timestamp = "Time",
+        glucose = "LBORRES",
+        subject_metadata = prefill_subject_metadata(
+          list(upload_mode = "single_file", data = example),
+          id_mapping = "USUBJID"
+        )
+      )
     )
 
-    expect_true("group" %in% names(standardized))
-    expect_setequal(unique(standardized$group), c("F", "M"))
+    expect_true("sex" %in% names(standardized))
+    expect_setequal(unique(standardized$sex), c("F", "M"))
+    expect_false("group" %in% names(standardized))
   }
 })

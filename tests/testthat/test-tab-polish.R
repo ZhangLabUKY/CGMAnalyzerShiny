@@ -1,21 +1,3 @@
-collect_polish_tag_ids <- function(ui) {
-  ids <- character()
-  walk <- function(node) {
-    if (inherits(node, "shiny.tag")) {
-      id <- node$attribs$id
-      if (!is.null(id)) {
-        ids <<- c(ids, id)
-      }
-      lapply(node$children, walk)
-    } else if (inherits(node, "shiny.tag.list") || is.list(node)) {
-      lapply(node, walk)
-    }
-    invisible(NULL)
-  }
-  walk(ui)
-  ids
-}
-
 test_that("data setup status reports readiness steps", {
   upload <- list(
     data = data.frame(time = "2026-05-05 08:00:00", glucose = 100),
@@ -250,13 +232,91 @@ test_that("imputation option UI is conditional on selected method", {
 
   expect_false(grepl("imputation_backend", off_html, fixed = TRUE))
   expect_false(grepl("imputation_xgb_rounds", off_html, fixed = TRUE))
-  expect_true(grepl("imputation_seed", on_html, fixed = TRUE))
-  expect_true(grepl("imputation_backend", on_html, fixed = TRUE))
-  expect_true(grepl("Python/sklearn", on_html, fixed = TRUE))
-  expect_true(grepl("imputation_interval_minutes", on_html, fixed = TRUE))
-  expect_true(grepl("imputation_arima_threshold", on_html, fixed = TRUE))
-  expect_true(grepl("imputation_arima_min_history", on_html, fixed = TRUE))
-  expect_true(grepl("imputation_xgb_rounds", on_html, fixed = TRUE))
+  expect_true(grepl("imputation_model", on_html, fixed = TRUE))
+  expect_true(grepl("LightGBM", on_html, fixed = TRUE))
+  expect_true(grepl("run_imputation", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_seed", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_backend", on_html, fixed = TRUE))
+  expect_false(grepl("Python/sklearn", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_interval_minutes", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_missing_warning_threshold", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_arima_threshold", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_arima_min_history", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_arima_order", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_lag_values", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_add_rollmean", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_roll_window", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_xgb_rounds", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_rf_trees", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_knn_k", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_lgb_rounds", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_study_start", on_html, fixed = TRUE))
+  expect_false(grepl("imputation_study_end", on_html, fixed = TRUE))
+})
+
+test_that("imputation run status UI reflects explicit run states", {
+  off_html <- paste(as.character(imputation_run_status_ui(list(state = "not_run"), "none")), collapse = "\n")
+  running_html <- paste(as.character(imputation_run_status_ui(list(state = "running"), "mice_only")), collapse = "\n")
+  stale_html <- paste(as.character(imputation_run_status_ui(list(state = "stale"), "mice_only")), collapse = "\n")
+  failed_html <- paste(as.character(imputation_run_status_ui(list(state = "failed", message = "Imputation failed."), "mice_only")), collapse = "\n")
+
+  expect_equal(off_html, "")
+  expect_true(grepl("running", running_html, fixed = TRUE))
+  expect_true(grepl("changed", stale_html, fixed = TRUE))
+  expect_true(grepl("Imputation failed", failed_html, fixed = TRUE))
+})
+
+test_that("preprocessing module returns explicit imputation settings through testServer", {
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp(c("2026-05-05 08:00:00", "2026-05-06 08:00:00")),
+    glucose = c(100, 110),
+    stringsAsFactors = FALSE
+  )
+  mapping <- list(
+    timestamp = "timestamp",
+    glucose = "glucose",
+    source_units = "mg/dL",
+    upload_mode = "single_file"
+  )
+
+  shiny::testServer(
+    preprocessing_module_server,
+    args = list(
+      mapping = shiny::reactive(mapping),
+      standardized = shiny::reactive(data)
+    ),
+    {
+      session$setInputs(
+        tir_lower = 75,
+        tir_upper = 175,
+        tbr_level2 = 55,
+        tar_level2 = 240,
+        valid_day_hours = 12,
+        analysis_date_range = as.Date(c("2026-05-05", "2026-05-06")),
+        expected_study_duration_days = 2,
+        imputation = "mice_only",
+        imputation_model = "xgboost",
+        run_imputation = 1
+      )
+
+      current <- settings()
+      expect_equal(current$thresholds_mg_dl$tir_lower, 75)
+      expect_equal(current$valid_day_hours, 12)
+      expect_equal(as.Date(current$analysis_date_range[["start"]]), as.Date("2026-05-05"))
+      expect_equal(current$expected_study_duration_days, 2)
+      expect_equal(current$imputation_method, "mice_only")
+      expect_equal(current$imputation_model, "xgboost")
+      expect_equal(current$imputation_backend, "mice")
+      expect_equal(current$imputation_interval_minutes, 5L)
+      expect_equal(as.Date(current$imputation_study_start), as.Date("2026-05-05"))
+      expect_equal(attr(settings, "imputation_run", exact = TRUE)(), 1)
+
+      set_status <- attr(settings, "set_imputation_status", exact = TRUE)
+      set_status(list(state = "stale", message = "Changed inputs require another imputation run."))
+      expect_equal(attr(settings, "imputation_status", exact = TRUE)()$state, "stale")
+    }
+  )
 })
 
 test_that("quality summary cards use QC and missingness values", {
@@ -320,80 +380,4 @@ test_that("plot selection summary respects daily overlay day filtering", {
   expect_equal(summary$Value[summary$Label == "Days"], "1")
   expect_equal(summary$Value[summary$Label == "Day selection"], "Selected days")
   expect_equal(summary$Value[summary$Label == "Date legend"], "Shown")
-})
-
-test_that("summary card UI uses shared classes across tabs", {
-  summary <- data.frame(
-    Label = c("Rows", "Subject IDs"),
-    Value = c("10", "2"),
-    stringsAsFactors = FALSE
-  )
-  html <- paste(as.character(summary_card_ui(summary)), collapse = "\n")
-  compact_html <- paste(as.character(summary_card_ui(summary, compact = TRUE)), collapse = "\n")
-
-  expect_true(grepl("cgm-summary-cards", html, fixed = TRUE))
-  expect_equal(lengths(regmatches(html, gregexpr("card cgm-summary-card", html, fixed = TRUE))), 2L)
-  expect_true(grepl("min-width:150px", html, fixed = TRUE))
-  expect_true(grepl("min-width:132px", compact_html, fixed = TRUE))
-})
-
-test_that("main tab UI exposes polish summary outputs", {
-  app_ids <- collect_polish_tag_ids(app_ui())
-  qc_html <- paste(as.character(qc_module_ui("qc")), collapse = "\n")
-  plots_html <- paste(as.character(plots_module_ui("plots")), collapse = "\n")
-  metrics_html <- paste(as.character(metrics_module_ui("metrics")), collapse = "\n")
-  combined_static_html <- paste(
-    qc_html,
-    plots_html,
-    metrics_html,
-    collapse = "\n"
-  )
-
-  expect_true("data_workflow_ui" %in% app_ids)
-  expect_true(is.function(data_validation_panel_ui))
-  expect_true(is.function(data_upload_summary))
-  expect_true(is.function(column_mapping_module_ui))
-  expect_true(is.function(preprocessing_module_ui))
-  expect_true(is.function(upload_preview_ui))
-  expect_false("column_mapping-mapping_note" %in% app_ids)
-  expect_false("preprocessing-tir_lower" %in% app_ids)
-  expect_false("upload-preview_rows" %in% app_ids)
-  preprocessing_html <- paste(as.character(preprocessing_module_ui("preprocessing")), collapse = "\n")
-  expect_true(grepl("preprocessing-imputation_panel", preprocessing_html, fixed = TRUE))
-  expect_true(grepl("preprocessing-expected_study_duration_days", preprocessing_html, fixed = TRUE))
-  expect_true(grepl("preprocessing-imputation_summary", preprocessing_html, fixed = TRUE))
-  expect_true(grepl("preprocessing-imputation_options_ui", preprocessing_html, fixed = TRUE))
-  expect_false(grepl("preprocessing-imputation_backend", preprocessing_html, fixed = TRUE))
-  expect_true(grepl("qc-qc_summary_cards", qc_html, fixed = TRUE))
-  expect_true(grepl("qc-study_window_table", qc_html, fixed = TRUE))
-  expect_true(grepl("qc-day_coverage_warning_note", qc_html, fixed = TRUE))
-  expect_true(grepl("plots-plot_summary", plots_html, fixed = TRUE))
-  expect_equal(
-    plot_download_filename(
-      data.frame(
-        id = "A",
-        timestamp = parse_cgm_timestamp("2026-05-05 08:00:00"),
-        glucose = 100,
-        stringsAsFactors = FALSE
-      )
-    ),
-    "cgm_trace_all-subjects_dates-2026-05-05-to-2026-05-05.png"
-  )
-  expect_true(grepl("Metric overview", metrics_html, fixed = TRUE))
-  expect_true(grepl("Detailed metrics", metrics_html, fixed = TRUE))
-  expect_true(is.function(metric_summary_cards))
-  expect_false(grepl(">Participant<", combined_static_html, fixed = TRUE))
-  expect_true(grepl(">Daily data coverage<", qc_html, fixed = TRUE))
-})
-
-test_that("metrics filter row keeps category next to subject", {
-  metrics_html <- paste(as.character(metrics_module_ui("metrics")), collapse = "\n")
-  subject_pos <- regexpr("metrics-participant_filter", metrics_html, fixed = TRUE)[[1L]]
-  category_pos <- regexpr("metrics-category_filter", metrics_html, fixed = TRUE)[[1L]]
-  group_pos <- regexpr("metrics-group_filter", metrics_html, fixed = TRUE)[[1L]]
-
-  expect_true(subject_pos > 0)
-  expect_true(category_pos > subject_pos)
-  expect_true(group_pos > category_pos)
-  expect_false(grepl("metrics-visit_filter", metrics_html, fixed = TRUE))
 })

@@ -140,12 +140,16 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
     plot_display_context <- shiny::reactive({
       req_active_tab(active_tab, "plots")
       plot_type <- input$plot_type %||% "trace"
-      filtered <- plot_filtered_data(
-        standardized(),
-        plot_type = plot_type,
-        participant = input$participant,
-        group = input$group,
-        day = normalized_day()
+      filtered <- cgm_timed(
+        "plots_filter_data",
+        plot_filtered_data(
+          standardized(),
+          plot_type = plot_type,
+          participant = input$participant,
+          group = input$group,
+          day = normalized_day()
+        ),
+        context = list(plot_type = plot_type)
       )
       if (identical(plot_type, "agp")) {
         return(list(
@@ -156,7 +160,12 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
         ))
       }
       max_points <- adaptive_plot_max_points_per_subject(filtered)
-      displayed_rows <- plot_display_row_count(filtered, max_points_per_participant = max_points)
+      displayed_rows <- cgm_timed(
+        "plots_display_row_count",
+        plot_display_row_count(filtered, max_points_per_participant = max_points),
+        rows = nrow(filtered),
+        context = list(plot_type = plot_type)
+      )
       list(
         filtered = filtered,
         max_points_per_participant = max_points,
@@ -207,33 +216,46 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
       plot_type <- input$plot_type %||% "trace"
       display_context <- plot_display_context()
       if (identical(plot_type, "daily_overlay")) {
-        return(create_daily_overlay_plot(
-          standardized(),
-          thresholds = thresholds,
-          participant = input$participant,
-          group = input$group,
-          day = normalized_day(),
-          max_points_per_participant = display_context$max_points_per_participant
+        return(cgm_timed(
+          "plots_create_daily_overlay",
+          create_daily_overlay_plot(
+            standardized(),
+            thresholds = thresholds,
+            participant = input$participant,
+            group = input$group,
+            day = normalized_day(),
+            max_points_per_participant = display_context$max_points_per_participant
+          )
         ))
       }
       if (identical(plot_type, "agp")) {
-        return(create_agp_summary_plot(
-          standardized(),
-          thresholds = thresholds,
-          participant = input$participant,
-          group = input$group
+        return(cgm_timed(
+          "plots_create_agp",
+          create_agp_summary_plot(
+            standardized(),
+            thresholds = thresholds,
+            participant = input$participant,
+            group = input$group
+          )
         ))
       }
 
-      data <- filter_plot_data(
-        standardized(),
-        participant = input$participant,
-        group = input$group
+      data <- cgm_timed(
+        "plots_trace_filter",
+        filter_plot_data(
+          standardized(),
+          participant = input$participant,
+          group = input$group
+        )
       )
-      create_trace_plot(
-        data,
-        thresholds = thresholds,
-        max_points_per_participant = display_context$max_points_per_participant
+      cgm_timed(
+        "plots_create_trace",
+        create_trace_plot(
+          data,
+          thresholds = thresholds,
+          max_points_per_participant = display_context$max_points_per_participant
+        ),
+        rows = nrow(data)
       )
     }),
     cgm_data_signature(standardized()),
@@ -246,9 +268,9 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
     )
 
     output$active_plot <- plotly::renderPlotly({
-      plotly_plot <- plotly::ggplotly(active_plot())
+      plotly_plot <- cgm_timed("plots_ggplotly_render", plotly::ggplotly(active_plot()))
       if (identical(input$plot_type, "agp")) {
-        plotly_plot <- layout_agp_plotly(plotly_plot)
+        plotly_plot <- cgm_timed("plots_agp_layout", layout_agp_plotly(plotly_plot))
       }
       plotly_plot
     })

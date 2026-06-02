@@ -48,5 +48,5 @@ test_that("run_metric_stat_test reports unavailable grouping for current complet
   result <- run_metric_stat_test(metrics, metric = "mean_glucose", grouping = "group", test_type = "welch_t")
 
   expect_true(is.na(result$`P-value`))
-  expect_match(result$Note, "exactly two groups")
+  expect_match(result$Note, "not available")
 })

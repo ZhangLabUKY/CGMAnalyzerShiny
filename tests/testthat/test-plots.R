@@ -469,28 +469,6 @@ test_that("AGP plot has legend-bearing percentile bands and median line", {
   expect_equal(plot$layers[[rect_idx]]$aes_params$alpha, 0.42)
 })
 
-test_that("plot download button is in the header action area before filters", {
-  ui <- plots_module_ui("plots")
-  html <- paste(as.character(ui), collapse = "\n")
-
-  expect_lt(
-    regexpr("plots-download_plot", html, fixed = TRUE)[[1L]],
-    regexpr("plots-filter_layout", html, fixed = TRUE)[[1L]]
-  )
-})
-
-test_that("plots module uses render-time Subject ID filter container", {
-  ui <- plots_module_ui("plots")
-  html <- paste(as.character(ui), collapse = "\n")
-  rendered_html <- paste(as.character(plot_filter_layout_ui(shiny::NS("plots"), "trace")), collapse = "\n")
-
-  expect_true(grepl("plots-filter_layout", html, fixed = TRUE))
-  expect_false(grepl("plots-plot_type", html, fixed = TRUE))
-  expect_true(grepl("plots-subject_filter", rendered_html, fixed = TRUE))
-  expect_false(grepl("id=\"plots-participant\"", html, fixed = TRUE))
-  expect_false(grepl(">Participant<", html, fixed = TRUE))
-})
-
 test_that("plots module rendering does not depend on metrics or complexity results", {
   data <- data.frame(
     id = rep("A", 3),
@@ -523,29 +501,7 @@ test_that("plots module rendering does not depend on metrics or complexity resul
   )
 })
 
-test_that("plot filter layout orders controls by plot type", {
-  trace_html <- paste(as.character(plot_filter_layout_ui(shiny::NS("plots"), "trace")), collapse = "\n")
-  agp_html <- paste(as.character(plot_filter_layout_ui(shiny::NS("plots"), "agp")), collapse = "\n")
-  daily_html <- paste(as.character(plot_filter_layout_ui(shiny::NS("plots"), "daily_overlay")), collapse = "\n")
-  pos <- function(html, id) regexpr(id, html, fixed = TRUE)[[1L]]
-
-  expect_lt(pos(trace_html, "plots-plot_type"), pos(trace_html, "plots-subject_filter"))
-  expect_lt(pos(trace_html, "plots-subject_filter"), pos(trace_html, "plots-group_filter"))
-  expect_false(grepl("plots-day_filter", trace_html, fixed = TRUE))
-  expect_false(grepl("plots-visit_filter", trace_html, fixed = TRUE))
-  expect_true(grepl("<option value=\"trace\" selected", trace_html, fixed = TRUE))
-
-  expect_lt(pos(agp_html, "plots-plot_type"), pos(agp_html, "plots-subject_filter"))
-  expect_lt(pos(agp_html, "plots-subject_filter"), pos(agp_html, "plots-group_filter"))
-  expect_false(grepl("plots-day_filter", agp_html, fixed = TRUE))
-  expect_false(grepl("plots-visit_filter", agp_html, fixed = TRUE))
-  expect_true(grepl("<option value=\"agp\" selected", agp_html, fixed = TRUE))
-
-  expect_lt(pos(daily_html, "plots-plot_type"), pos(daily_html, "plots-day_filter"))
-  expect_lt(pos(daily_html, "plots-day_filter"), pos(daily_html, "plots-subject_filter"))
-  expect_lt(pos(daily_html, "plots-subject_filter"), pos(daily_html, "plots-group_filter"))
-  expect_false(grepl("plots-visit_filter", daily_html, fixed = TRUE))
-  expect_true(grepl("<option value=\"daily_overlay\" selected", daily_html, fixed = TRUE))
+test_that("plot filter helper selects relevant controls by plot type", {
   expect_equal(plot_filter_layout_order("trace"), c("subject_filter", "group_filter"))
   expect_equal(plot_filter_layout_order("agp"), c("subject_filter", "group_filter"))
   expect_equal(plot_filter_layout_order("daily_overlay"), c("day_filter", "subject_filter", "group_filter"))

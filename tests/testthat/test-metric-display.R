@@ -18,7 +18,8 @@ test_that("prepare_metrics_display returns readable long-format rows", {
   )
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
-  expect_true(all(c("Subject ID", "Group", "Category", "Metric", "Definition", "Value", "Units") %in% names(display)))
+  expect_true(all(c("Subject ID", "Category", "Metric", "Definition", "Value", "Units") %in% names(display)))
+  expect_false("Group" %in% names(display))
   expect_false("Visit" %in% names(display))
   expect_true(nrow(display) > 20)
   expect_true(all(c("Data Coverage", "Central Tendency", "Variability", "Time in Range", "Detailed Range Bands", "Risk", "Excursions") %in% display$Category))
@@ -217,8 +218,12 @@ test_that("metric display hides Subject ID for one filename-derived subject", {
     raw,
     mapping = list(id = "", timestamp = "time", glucose = "glucose")
   )
-  display <- prepare_metrics_display(compute_base_core_metrics(standardized))
+  metrics <- compute_base_core_metrics(standardized)
+  display <- prepare_metrics_display(metrics)
+  forced <- prepare_metrics_display(metrics, show_subject_id = TRUE)
 
   expect_false("Subject ID" %in% names(display))
   expect_equal(filter_metrics_display(display, participant = "one_subject"), display)
+  expect_true("Subject ID" %in% names(forced))
+  expect_equal(unique(forced[["Subject ID"]]), "one_subject")
 })

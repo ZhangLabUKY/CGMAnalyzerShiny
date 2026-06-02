@@ -1,33 +1,99 @@
-<!-- badges: start -->
-[![R-CMD-check](https://github.com/ZhangLabUKY/CGMAnalyzerShiny/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/ZhangLabUKY/CGMAnalyzerShiny/actions/workflows/R-CMD-check.yaml)
-<!-- badges: end -->
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
 
 # CGMAnalyzerShiny
 
-`CGMAnalyzerShiny` is a package-style Shiny application scaffold for continuous
-glucose monitoring analysis. The app starts with upload, column mapping,
-quality control, core metrics, trace plots, TIR plots, and CSV exports.
+`CGMAnalyzerShiny` is an interactive Shiny application for continuous
+glucose monitoring (CGM) analysis. It is designed for research and
+applied analytic workflows where users need to upload CGM files, check
+data quality, review missingness, calculate clinically relevant glucose
+metrics, visualize glucose patterns, and export reproducible analysis
+outputs.
 
-The analysis roadmap prefers `CGManalyzer` for standard CGM analysis, uses
-`iglu` selectively for validation or gaps, and reserves `CGMissingDataR` for
-missing glucose imputation workflows after the non-imputed MVP is stable.
+The application supports both single-file and multi-file CGM workflows.
+Users can work with uploaded CGM exports or bundled example datasets,
+map the columns needed for analysis, define preprocessing settings, and
+move through quality control, metrics, plots, complexity analytics,
+statistical testing, and export tabs in one place.
 
-## Run Locally
+## What the app does
 
-Open the project in RStudio and run:
+`CGMAnalyzerShiny` helps turn raw or semi-structured CGM data into
+analysis-ready outputs. The app can:
 
-```r
+- Upload CSV, TXT, XLS, and XLSX CGM files, including
+  one-file-per-subject uploads.
+- Detect and preview raw CGM exports that include metadata rows before
+  the data table.
+- Map Subject ID, timestamp, glucose, source units, and optional subject
+  metadata.
+- Parse common CGM timestamp formats and preserve standardized
+  timestamps for analysis and export.
+- Review data readiness, timestamp parsing, glucose parsing, missing
+  glucose values, duplicate timestamps, implausible glucose values, and
+  source-unit checks.
+- Apply an analysis date range so downstream summaries, metrics, plots,
+  and exports focus on the selected window.
+- Review quality control summaries, missingness summaries, daily data
+  coverage, timestamp gaps, and study-window coverage.
+- Apply explicit missing-glucose imputation when selected, while keeping
+  the original standardized data available for export.
+- Calculate core CGM metrics, detailed range metrics, risk and excursion
+  metrics, subject-level summaries, nonlinear complexity metrics, and
+  group-aware statistical comparisons.
+- View trace plots, daily overlay plots, AGP-style summaries, and daily
+  data coverage visualizations.
+- Export standardized data, current analysis data, metrics, quality
+  control summaries, plot images, and reproducibility settings.
+
+## Typical workflow
+
+A typical session starts in the **Data** tab. Users upload one or more
+CGM files or load an example dataset, review the detected import setup,
+and map the required timestamp and glucose columns. A Subject ID column
+can be mapped when available; otherwise, single-file data can use the
+file name as the Subject ID, and multi-file uploads use file names as
+Subject IDs.
+
+After mapping, the app displays data validation and summary information.
+Users can set glucose thresholds, valid-day criteria, an analysis date
+range, optional expected study duration, and missing-glucose imputation
+settings. These preprocessing choices define the analysis data used by
+the Quality, Metrics, Complexity, Plots, Statistics, and Export tabs.
+
+The **Quality** tab summarizes data coverage and review items. The
+**Metrics** tab presents clinically relevant CGM metrics in a readable
+long format. The **Complexity** tab summarizes regularity and long-range
+structure in glucose patterns. The **Plots** tab provides interactive
+visual summaries, and the **Statistics** tab supports subject-level
+group comparisons for selected metric outcomes.
+
+## Run locally
+
+From the project directory, open R or RStudio and run:
+
+``` r
 source("app.R")
 ```
 
-Once the package is loaded or installed, you can also run:
+If the package has already been loaded or installed, the app can also be
+started with:
 
-```r
+``` r
 CGMAnalyzerShiny::run_app()
 ```
 
-## Current Status
+## Data and outputs
 
-This is the Phase 0/Phase 1 foundation. Advanced imputation, statistical
-testing, and complexity analytics are represented in the module structure and
-will be implemented after the core upload-QC-metrics pipeline is validated.
+The app stores CGM data in a standardized structure with Subject ID,
+timestamp, glucose, units, source file, optional metadata, and
+preprocessing flags. The original standardized data and the current
+analysis data are kept conceptually separate so users can export both
+the uploaded-data view and the analysis view after filtering or
+imputation.
+
+Export options include standardized data, analysis data, metric
+summaries, quality control summaries, plot images, and a settings log.
+These outputs are intended to support reproducible review of CGM
+preprocessing choices, analysis filters, summary metrics,
+visualizations, and statistical comparisons.

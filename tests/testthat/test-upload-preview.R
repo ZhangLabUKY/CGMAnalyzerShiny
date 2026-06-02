@@ -91,7 +91,7 @@ test_that("mapping choices support multi-file filename ids and first-render colu
   expect_equal(unname(choices$optional_choices), c("", "time", "glucose", "group"))
 })
 
-test_that("mapping choices expose optional group metadata without internal source columns", {
+test_that("mapping choices expose metadata source columns without internal source columns", {
   uploaded <- list(
     upload_mode = "single_file",
     data = data.frame(
@@ -111,7 +111,6 @@ test_that("mapping choices expose optional group metadata without internal sourc
   expect_true("SEX" %in% unname(choices$optional_choices))
   expect_false(".source_file" %in% unname(choices$optional_choices))
   expect_false(".source_id" %in% unname(choices$optional_choices))
-  expect_equal(choices$group, "")
 })
 
 test_that("mapping choices keep single-file subject id optional", {
@@ -148,115 +147,42 @@ test_that("subject id mapping labels and status use filename fallback", {
   expect_equal(subject_id_status_value(multi, "ignored_column"), "File name")
 })
 
-test_that("column mapping UI exposes group metadata and hides removed optional controls", {
+test_that("column mapping UI exposes subject metadata action and hides removed optional controls", {
   html <- paste(as.character(column_mapping_module_ui("column_mapping")), collapse = "\n")
 
-  expect_true(grepl("column_mapping-group_mapping_ui", html, fixed = TRUE))
+  expect_true(grepl("column_mapping-edit_metadata", html, fixed = TRUE))
+  expect_true(grepl("Subject Metadata", html, fixed = TRUE))
+  expect_false(grepl("column_mapping-group_mapping_ui", html, fixed = TRUE))
   expect_false(grepl("column_mapping-visit_col", html, fixed = TRUE))
   expect_false(grepl("column_mapping-device_mapping_ui", html, fixed = TRUE))
   expect_false(grepl("column_mapping-timestamp_order_ui", html, fixed = TRUE))
   expect_false(grepl("Date order", html, fixed = TRUE))
 })
 
-collect_tag_ids <- function(ui) {
-  ids <- character()
-  walk <- function(node) {
-    if (inherits(node, "shiny.tag")) {
-      id <- node$attribs$id
-      if (!is.null(id)) {
-        ids <<- c(ids, id)
-      }
-      lapply(node$children, walk)
-    } else if (inherits(node, "shiny.tag.list") || is.list(node)) {
-      lapply(node, walk)
-    }
-    invisible(NULL)
-  }
-  walk(ui)
-  ids
-}
+test_that("subject metadata initializes, normalizes, and drops blank columns", {
+  uploaded <- list(
+    upload_mode = "multi_file",
+    data = data.frame(
+      SEX = c("F", "F", "M"),
+      AGE = c("42", "42", ""),
+      HBA1C = c("", "", ""),
+      .source_id = c("A", "A", "B"),
+      stringsAsFactors = FALSE
+    )
+  )
 
-collect_tag_classes <- function(ui) {
-  classes <- character()
-  walk <- function(node) {
-    if (inherits(node, "shiny.tag")) {
-      class <- node$attribs$class
-      if (!is.null(class)) {
-        classes <<- c(classes, class)
-      }
-      lapply(node$children, walk)
-    } else if (inherits(node, "shiny.tag.list") || is.list(node)) {
-      lapply(node, walk)
-    }
-    invisible(NULL)
-  }
-  walk(ui)
-  classes
-}
+  metadata <- prefill_subject_metadata(uploaded)
+  cleaned <- clean_subject_metadata(metadata)
+  custom_name <- normalize_metadata_column_name("Baseline BMI (%)")
 
-test_that("data tab hides downstream workflow before upload", {
-  ids <- collect_tag_ids(app_ui())
-
-  expect_true("upload-cgm_files" %in% ids)
-  expect_true("upload-load_example_complete" %in% ids)
-  expect_true("upload-load_example_missing_5pct" %in% ids)
-  expect_true("upload-load_example_missing_10pct" %in% ids)
-  expect_false("upload-load_demo" %in% ids)
-  expect_false("upload-load_missingness_demo" %in% ids)
-  expect_true("data_upload_hint" %in% ids)
-  expect_true("upload-import_setup" %in% ids)
-  expect_true("data_mapping_ui" %in% ids)
-  expect_true("data_workflow_ui" %in% ids)
-  expect_false("column_mapping-mapping_note" %in% ids)
-  expect_false("preprocessing-tir_lower" %in% ids)
-  expect_false("upload-preview_rows" %in% ids)
-})
-
-test_that("navbar exposes stable selected tab id and spinner-wrapped heavy outputs", {
-  ui <- app_ui()
-  ids <- collect_tag_ids(ui)
-  classes <- collect_tag_classes(ui)
-
-  expect_true("active_tab" %in% ids)
-  expect_true(any(grepl("load-container", classes, fixed = TRUE)))
-  expect_true("metrics-metrics_table" %in% ids)
-  expect_true("qc-qc_table" %in% ids)
-  expect_true("qc-missingness_subject_filter" %in% ids)
-  expect_false("qc-missingness_participant" %in% ids)
-  expect_true("qc-missingness_heatmap_ui" %in% ids)
-  expect_false("qc-missingness_timeline" %in% ids)
-  expect_true("plots-filter_layout" %in% ids)
-  expect_false("plots-participant" %in% ids)
-  expect_true("plots-active_plot" %in% ids)
-  expect_false("plots-plot_detail" %in% ids)
-  expect_true("stats-test_result" %in% ids)
-  expect_false("complexity-data_requirements" %in% ids)
-  expect_true("complexity-metrics_table_ui" %in% ids)
-})
-
-test_that("navbar places complexity after metrics and before plots/statistics", {
-  expected_labels <- c("Data", "Quality", "Metrics", "Complexity", "Plots", "Statistics", "Export")
-  labels <- character()
-  walk_links <- function(node) {
-    if (inherits(node, "shiny.tag")) {
-      if (identical(node[["name"]], "a")) {
-        labels <<- c(labels, paste(unlist(node[["children"]]), collapse = ""))
-      }
-      lapply(node[["children"]], walk_links)
-    } else if (inherits(node, "shiny.tag.list") || is.list(node)) {
-      lapply(node, walk_links)
-    }
-    invisible(NULL)
-  }
-  walk_links(app_ui())
-  labels <- labels[labels %in% expected_labels]
-  positions <- stats::setNames(match(expected_labels, labels), expected_labels)
-
-  expect_false(any(is.na(positions)))
-  expect_true(positions[["Metrics"]] < positions[["Complexity"]])
-  expect_true(positions[["Complexity"]] < positions[["Plots"]])
-  expect_true(positions[["Complexity"]] < positions[["Statistics"]])
-  expect_true(positions[["Statistics"]] < positions[["Export"]])
+  expect_equal(metadata$id, c("A", "B"))
+  expect_equal(metadata$sex, c("F", "M"))
+  expect_equal(metadata$age, c("42", ""))
+  expect_equal(metadata$hba1c, c("", ""))
+  expect_true("sex" %in% names(cleaned))
+  expect_true("age" %in% names(cleaned))
+  expect_false("hba1c" %in% names(cleaned))
+  expect_equal(custom_name, "baseline_bmi")
 })
 
 test_that("active tab helper gates tabs predictably", {

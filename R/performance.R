@@ -28,3 +28,120 @@ cgm_data_signature <- function(data) {
 threshold_signature <- function(thresholds) {
   unlist(thresholds[c("tbr_level2", "tir_lower", "tir_upper", "tar_level2")], use.names = TRUE)
 }
+
+cgm_performance_log_enabled <- function() {
+  isTRUE(getOption("CGMA.performance_log", FALSE))
+}
+
+cgm_performance_log_file <- function() {
+  file <- getOption("CGMA.performance_log_file", FALSE)
+  if (isFALSE(file) || is.null(file)) {
+    return("")
+  }
+  if (isTRUE(file)) {
+    file.path(
+      "dev_notes",
+      "logs",
+      paste0("performance-", format(Sys.Date(), "%Y%m%d"), ".csv")
+    )
+  } else {
+    as.character(file[[1L]])
+  }
+}
+
+cgm_performance_result_rows <- function(value) {
+  if (is.data.frame(value)) {
+    return(nrow(value))
+  }
+  if (is.list(value) && is.data.frame(value$data)) {
+    return(nrow(value$data))
+  }
+  NA_integer_
+}
+
+cgm_performance_context_text <- function(context = NULL) {
+  if (is.null(context) || !length(context)) {
+    return("")
+  }
+  values <- unlist(context, recursive = FALSE, use.names = TRUE)
+  values <- values[!is.na(names(values)) & nzchar(names(values))]
+  if (!length(values)) {
+    return("")
+  }
+  paste(
+    sprintf("%s=%s", names(values), vapply(values, as.character, character(1))),
+    collapse = ";"
+  )
+}
+
+cgm_log_performance <- function(label, elapsed_ms, rows = NA_integer_, status = "ok", context = NULL) {
+  if (!cgm_performance_log_enabled()) {
+    return(invisible(NULL))
+  }
+  label <- as.character(label[[1L]])
+  row_text <- if (is.na(rows)) "" else paste0(" rows=", rows)
+  context_text <- cgm_performance_context_text(context)
+  context_message <- if (nzchar(context_text)) paste0(" ", context_text) else ""
+  message(sprintf("[CGMA perf] %s %.1f ms status=%s%s%s", label, elapsed_ms, status, row_text, context_message))
+
+  file <- cgm_performance_log_file()
+  if (nzchar(file)) {
+    dir.create(dirname(file), recursive = TRUE, showWarnings = FALSE)
+    row <- data.frame(
+      timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+      label = label,
+      elapsed_ms = round(elapsed_ms, 3),
+      rows = if (is.na(rows)) NA_integer_ else as.integer(rows),
+      status = status,
+      context = context_text,
+      stringsAsFactors = FALSE
+    )
+    utils::write.table(
+      row,
+      file = file,
+      append = file.exists(file),
+      sep = ",",
+      row.names = FALSE,
+      col.names = !file.exists(file),
+      qmethod = "double"
+    )
+  }
+  invisible(NULL)
+}
+
+cgm_timed <- function(label, expr, rows = NULL, context = NULL) {
+  if (!cgm_performance_log_enabled()) {
+    return(force(expr))
+  }
+  start <- proc.time()[["elapsed"]]
+  status <- "ok"
+  error <- NULL
+  value <- tryCatch(
+    force(expr),
+    error = function(e) {
+      status <<- "error"
+      error <<- e
+      NULL
+    }
+  )
+  elapsed_ms <- 1000 * (proc.time()[["elapsed"]] - start)
+  resolved_rows <- rows
+  if (is.null(resolved_rows)) {
+    resolved_rows <- cgm_performance_result_rows(value)
+  }
+  log_context <- context
+  if (!is.null(error)) {
+    log_context <- c(log_context %||% list(), list(error_message = conditionMessage(error)))
+  }
+  cgm_log_performance(
+    label = label,
+    elapsed_ms = elapsed_ms,
+    rows = resolved_rows %||% NA_integer_,
+    status = status,
+    context = log_context
+  )
+  if (!is.null(error)) {
+    stop(error)
+  }
+  value
+}

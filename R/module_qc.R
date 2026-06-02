@@ -27,23 +27,59 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
   shiny::moduleServer(id, function(input, output, session) {
     qc_summary <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, c("quality", "export"))
-      compute_qc_summary(
-        analysis_data(),
-        valid_day_hours = settings()$valid_day_hours
+      cgm_timed(
+        "quality_qc_summary",
+        compute_qc_summary(
+          analysis_data(),
+          valid_day_hours = settings()$valid_day_hours
+        )
       )
     }),
     cgm_data_signature(analysis_data()),
     settings()$valid_day_hours
     )
 
+    standardized_missingness <- shiny::bindCache(shiny::reactive({
+      req_active_tab(active_tab, "quality")
+      cgm_timed(
+        "quality_standardized_missingness_precompute",
+        missingness_precompute(
+          standardized(),
+          interval_minutes = settings()$imputation_interval_minutes %||% 5L
+        )
+      )
+    }),
+    cgm_data_signature(standardized()),
+    settings()$imputation_interval_minutes
+    )
+
+    analysis_missingness <- shiny::bindCache(shiny::reactive({
+      req_active_tab(active_tab, "quality")
+      cgm_timed(
+        "quality_analysis_missingness_precompute",
+        missingness_precompute(
+          analysis_data(),
+          interval_minutes = settings()$imputation_interval_minutes %||% 5L
+        )
+      )
+    }),
+    cgm_data_signature(analysis_data()),
+    settings()$imputation_interval_minutes
+    )
+
     missingness_comparison <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "quality")
-      compare_missingness_summaries(
-        standardized(),
-        analysis_data(),
-        valid_day_hours = settings()$valid_day_hours,
-        include_preprocessing = should_show_analysis_missingness(settings()),
-        interval_minutes = settings()$imputation_interval_minutes %||% 5L
+      cgm_timed(
+        "quality_missingness_comparison",
+        compare_missingness_summaries(
+          standardized(),
+          analysis_data(),
+          valid_day_hours = settings()$valid_day_hours,
+          include_preprocessing = should_show_analysis_missingness(settings()),
+          interval_minutes = settings()$imputation_interval_minutes %||% 5L,
+          original_precomputed = standardized_missingness(),
+          analysis_precomputed = analysis_missingness()
+        )
       )
     }),
     cgm_data_signature(standardized()),
@@ -55,9 +91,12 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
 
     study_window <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "quality")
-      study_window_summary(
-        analysis_data(),
-        expected_duration_days = settings()$expected_study_duration_days
+      cgm_timed(
+        "quality_study_window",
+        study_window_summary(
+          analysis_data(),
+          expected_duration_days = settings()$expected_study_duration_days
+        )
       )
     }),
     cgm_data_signature(analysis_data()),
@@ -66,7 +105,16 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
 
     imputation_status <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "quality")
-      summarize_imputation_status(standardized(), analysis_data(), settings())
+      cgm_timed(
+        "quality_imputation_status",
+        summarize_imputation_status(
+          standardized(),
+          analysis_data(),
+          settings(),
+          original_precomputed = standardized_missingness(),
+          analysis_precomputed = analysis_missingness()
+        )
+      )
     }),
     cgm_data_signature(standardized()),
     cgm_data_signature(analysis_data()),
@@ -75,36 +123,58 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
 
     gap_periods <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "quality")
-      detect_gap_periods(
-        analysis_data(),
-        interval_minutes = settings()$imputation_interval_minutes %||% 5L
+      cgm_timed(
+        "quality_gap_periods",
+        detect_gap_periods(
+          analysis_data(),
+          interval_minutes = settings()$imputation_interval_minutes %||% 5L,
+          precomputed = analysis_missingness()
+        )
       )
     }),
     cgm_data_signature(analysis_data()),
     settings()$imputation_interval_minutes
     )
 
+    missingness_calendar_all <- shiny::bindCache(shiny::reactive({
+      req_active_tab(active_tab, "quality")
+      cgm_timed(
+        "quality_daily_coverage_calendar_data",
+        compute_missingness_calendar_data(
+          analysis_data(),
+          gaps = gap_periods(),
+          date_range = settings()$analysis_date_range,
+          interval_minutes = settings()$imputation_interval_minutes %||% 5L,
+          precomputed = analysis_missingness()
+        )
+      )
+    }),
+    cgm_data_signature(analysis_data()),
+    analysis_date_range_signature(settings()),
+    settings()$imputation_interval_minutes
+    )
+
     missingness_calendar_data <- shiny::reactive({
       req_active_tab(active_tab, "quality")
-      data <- analysis_data()
-      gaps <- gap_periods()
-      participant <- normalize_filter_value(input$missingness_participant)
-      if (nzchar(participant)) {
-        data <- data[data$id == participant, , drop = FALSE]
-        if (is.data.frame(gaps) && nrow(gaps) && "id" %in% names(gaps)) {
-          gaps <- gaps[gaps$id == participant, , drop = FALSE]
-        }
-      }
-      compute_missingness_calendar_data(
-        data,
-        gaps = gaps,
-        date_range = settings()$analysis_date_range,
-        interval_minutes = settings()$imputation_interval_minutes %||% 5L
+      cgm_timed(
+        "quality_daily_coverage_filter",
+        filter_missingness_calendar_participant(
+          missingness_calendar_all(),
+          participant = input$missingness_participant %||% ""
+        )
       )
     })
 
+    force_missingness_subject_id_display <- shiny::reactive({
+      specific_filter_selected(input$missingness_participant)
+    })
+
     day_coverage_summary <- shiny::reactive({
-      day_coverage_warning_summary(missingness_calendar_data(), data = analysis_data())
+      day_coverage_warning_summary(
+        missingness_calendar_data(),
+        data = analysis_data(),
+        show_subject_id = force_missingness_subject_id_display()
+      )
     })
 
     missingness_comparison_display <- shiny::reactive({
@@ -131,7 +201,12 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
     })
 
     output$qc_table <- DT::renderDT({
-      DT::datatable(prepare_qc_display(qc_summary(), analysis_data()), options = list(scrollX = TRUE, pageLength = 10))
+      display <- cgm_timed("quality_qc_table_prepare", prepare_qc_display(qc_summary(), analysis_data()))
+      cgm_timed(
+        "quality_qc_table_dt_render",
+        DT::datatable(display, options = list(scrollX = TRUE, pageLength = 10)),
+        rows = nrow(display)
+      )
     })
 
     output$qc_summary_cards <- shiny::renderUI({
@@ -148,7 +223,12 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
     })
 
     output$study_window_table <- DT::renderDT({
-      DT::datatable(study_window(), rownames = FALSE, options = list(scrollX = FALSE, pageLength = 10))
+      table <- study_window()
+      cgm_timed(
+        "quality_study_window_dt_render",
+        DT::datatable(table, rownames = FALSE, options = list(scrollX = FALSE, pageLength = 10)),
+        rows = nrow(table)
+      )
     })
 
     output$duplicate_timestamp_note <- shiny::renderUI({
@@ -186,10 +266,8 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
           class = "row",
           shiny::tags$dt(class = "col-sm-3", "Method"),
           shiny::tags$dd(class = "col-sm-9", status$Method[[1L]]),
-          shiny::tags$dt(class = "col-sm-3", "Backend"),
-          shiny::tags$dd(class = "col-sm-9", status$Backend[[1L]]),
-          shiny::tags$dt(class = "col-sm-3", "Seed"),
-          shiny::tags$dd(class = "col-sm-9", status$Seed[[1L]]),
+          shiny::tags$dt(class = "col-sm-3", "Model"),
+          shiny::tags$dd(class = "col-sm-9", status$Model[[1L]]),
           shiny::tags$dt(class = "col-sm-3", "Rows filled"),
           shiny::tags$dd(class = "col-sm-9", status[["Filled glucose rows"]][[1L]])
         ),
@@ -209,7 +287,12 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
     })
 
     output$missingness_comparison_table <- DT::renderDT({
-      DT::datatable(missingness_comparison_display(), rownames = FALSE, options = list(scrollX = FALSE, pageLength = 10))
+      display <- missingness_comparison_display()
+      cgm_timed(
+        "quality_missingness_table_dt_render",
+        DT::datatable(display, rownames = FALSE, options = list(scrollX = FALSE, pageLength = 10)),
+        rows = nrow(display)
+      )
     })
 
     output$day_coverage_warning_note <- shiny::renderUI({
@@ -227,7 +310,10 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
       req_active_tab(active_tab, "quality")
       dimensions <- missingness_calendar_dimensions(
         missingness_calendar_data(),
-        show_subject_id = subject_id_filter_available(analysis_data())
+        show_subject_id = show_subject_id_for_display(
+          analysis_data(),
+          subject_id_filter_available(analysis_data()) || force_missingness_subject_id_display()
+        )
       )
       plotly::plotlyOutput(
         session$ns("missingness_heatmap"),
@@ -236,9 +322,13 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
     })
 
     output$missingness_heatmap <- plotly::renderPlotly({
-      create_missingness_heatmap_plot(
-        analysis_data(),
-        calendar_data = missingness_calendar_data()
+      cgm_timed(
+        "quality_daily_coverage_plotly_render",
+        create_missingness_heatmap_plot(
+          analysis_data(),
+          calendar_data = missingness_calendar_data(),
+          show_subject_id = subject_id_filter_available(analysis_data()) || force_missingness_subject_id_display()
+        )
       )
     })
 

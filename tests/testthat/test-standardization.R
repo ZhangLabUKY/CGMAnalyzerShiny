@@ -74,20 +74,38 @@ test_that("standardize_cgm_data maps required and optional columns", {
     subject = c("A", "A", "B"),
     time = c("2026-05-05 08:00:00", "2026-05-05 08:05:00", "2026-05-05 08:00:00"),
     value = c("100", "110", "6.0"),
-    arm = c("Control", "Control", "Treatment"),
+    stringsAsFactors = FALSE
+  )
+  subject_metadata <- data.frame(
+    id = c("A", "B"),
+    group = c("Control", "Treatment"),
+    age = c("42", "55"),
+    sex = c("F", "M"),
+    hba1c = c("6.2", "7.1"),
+    empty_feature = c(NA_character_, NA_character_),
     stringsAsFactors = FALSE
   )
 
   out <- standardize_cgm_data(
     raw,
-    mapping = list(id = "subject", timestamp = "time", glucose = "value", group = "arm", source_units = "mg/dL"),
+    mapping = list(
+      id = "subject",
+      timestamp = "time",
+      glucose = "value",
+      subject_metadata = subject_metadata,
+      source_units = "mg/dL"
+    ),
     units = "mg/dL"
   )
 
-  expect_named(out, c("id", "id_source", "timestamp", "glucose", "units", "device", "group", "source_file", "imputed_flag"))
+  expect_named(out, c("id", "id_source", "timestamp", "glucose", "units", "device", "source_file", "imputed_flag", "group", "age", "sex", "hba1c"))
   expect_equal(out$id, c("A", "A", "B"))
   expect_equal(unique(out$id_source), subject_id_source_mapped())
   expect_equal(out$group, c("Control", "Control", "Treatment"))
+  expect_equal(out$age, c("42", "42", "55"))
+  expect_equal(out$sex, c("F", "F", "M"))
+  expect_equal(out$hba1c, c("6.2", "6.2", "7.1"))
+  expect_false("empty_feature" %in% names(out))
   expect_true(all(out$units == "mg/dL"))
   expect_true(all(out$imputed_flag == FALSE))
 })
@@ -112,7 +130,12 @@ test_that("example CGMissingDataR-style upload shape parses colon time and missi
 
   out <- standardize_cgm_data(
     raw,
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES", group = "SEX")
+    mapping = list(
+      id = "USUBJID",
+      timestamp = "Time",
+      glucose = "LBORRES",
+      subject_metadata = data.frame(id = c("11", "18"), group = c("F", "M"), stringsAsFactors = FALSE)
+    )
   )
 
   expect_equal(subject_id_values(out), c("11", "18"))
@@ -155,7 +178,10 @@ test_that("standardize_cgm_data keeps optional columns empty when mappings are o
   )
 
   expect_true(all(is.na(out$device)))
-  expect_true(all(is.na(out$group)))
+  expect_false("group" %in% names(out))
+  expect_false("age" %in% names(out))
+  expect_false("sex" %in% names(out))
+  expect_false("hba1c" %in% names(out))
 })
 
 test_that("standardize_cgm_data still supports direct backend device mapping", {
@@ -257,7 +283,12 @@ test_that("multi-file standardization uses filename-derived participant ids", {
 
   out <- standardize_cgm_data(
     raw,
-    mapping = list(id = "id", timestamp = "time", glucose = "glucose", group = "group"),
+    mapping = list(
+      id = "id",
+      timestamp = "time",
+      glucose = "glucose",
+      subject_metadata = data.frame(id = "PatientA", group = "Control", stringsAsFactors = FALSE)
+    ),
     upload_mode = "multi_file"
   )
 
@@ -281,7 +312,11 @@ test_that("multiple uploaded files combine while preserving source fields", {
 
   out <- standardize_cgm_data(
     combined,
-    mapping = list(timestamp = "time", glucose = "glucose", group = "group"),
+    mapping = list(
+      timestamp = "time",
+      glucose = "glucose",
+      subject_metadata = data.frame(id = c("A", "B"), group = c("Control", "Treatment"), stringsAsFactors = FALSE)
+    ),
     upload_mode = "multi_file"
   )
 

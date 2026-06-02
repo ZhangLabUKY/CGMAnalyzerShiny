@@ -528,7 +528,7 @@ imputation_review_level <- function(missing_rows, missing_percent) {
   }
 }
 
-imputation_subject_missingness_summary <- function(data, interval_minutes = 5L) {
+imputation_subject_missingness_summary <- function(data, interval_minutes = 5L, precomputed = NULL) {
   empty <- data.frame(
     `Subject ID` = character(),
     `Missing glucose values` = integer(),
@@ -546,7 +546,10 @@ imputation_subject_missingness_summary <- function(data, interval_minutes = 5L) 
   }
 
   grid_summary <- if (all(c("timestamp") %in% names(data)) && any(is_finite_cgm_timestamp(data$timestamp))) {
-    tryCatch(missingness_grid_summary_by_id(data, interval_minutes = interval_minutes), error = function(e) NULL)
+    tryCatch(
+      missingness_grid_summary_by_id(data, interval_minutes = interval_minutes, precomputed = precomputed),
+      error = function(e) NULL
+    )
   } else {
     NULL
   }
@@ -592,7 +595,7 @@ imputation_subject_missingness_summary <- function(data, interval_minutes = 5L) 
   out
 }
 
-imputation_missingness_summary <- function(data, interval_minutes = 5L) {
+imputation_missingness_summary <- function(data, interval_minutes = 5L, precomputed = NULL) {
   if (!is.data.frame(data) || !nrow(data) || !"glucose" %in% names(data)) {
     out <- data.frame(
       rows = 0L,
@@ -606,12 +609,19 @@ imputation_missingness_summary <- function(data, interval_minutes = 5L) {
       message = "Map timestamp and glucose columns to review imputation needs.",
       stringsAsFactors = FALSE
     )
-    attr(out, "subject_missingness") <- imputation_subject_missingness_summary(data, interval_minutes = interval_minutes)
+    attr(out, "subject_missingness") <- imputation_subject_missingness_summary(
+      data,
+      interval_minutes = interval_minutes,
+      precomputed = precomputed
+    )
     return(out)
   }
 
   grid_summary <- if (all(c("id", "timestamp") %in% names(data)) && any(is_finite_cgm_timestamp(data$timestamp))) {
-    tryCatch(missingness_grid_summary_by_id(data, interval_minutes = interval_minutes), error = function(e) NULL)
+    tryCatch(
+      missingness_grid_summary_by_id(data, interval_minutes = interval_minutes, precomputed = precomputed),
+      error = function(e) NULL
+    )
   } else {
     NULL
   }
@@ -660,7 +670,11 @@ imputation_missingness_summary <- function(data, interval_minutes = 5L) {
     message = message,
     stringsAsFactors = FALSE
   )
-  attr(out, "subject_missingness") <- imputation_subject_missingness_summary(data, interval_minutes = interval_minutes)
+  attr(out, "subject_missingness") <- imputation_subject_missingness_summary(
+    data,
+    interval_minutes = interval_minutes,
+    precomputed = precomputed
+  )
   out
 }
 

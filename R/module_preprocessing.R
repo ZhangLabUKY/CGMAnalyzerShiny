@@ -38,7 +38,8 @@ preprocessing_module_ui <- function(id) {
           )
         )
       ),
-      shiny::uiOutput(ns("imputation_options_ui"))
+      shiny::uiOutput(ns("imputation_options_ui")),
+      shiny::uiOutput(ns("imputation_run_status"))
     )
   )
 }
@@ -49,26 +50,90 @@ imputation_options_ui <- function(selected_method = "none", ns = identity) {
   }
   shiny::tagList(
     shiny::fluidRow(
-      shiny::column(2, shiny::numericInput(ns("imputation_seed"), "Seed", value = 42, min = 1, step = 1)),
       shiny::column(
-        2,
+        3,
         shiny::selectInput(
-          ns("imputation_backend"),
-          "Backend",
-          choices = c("R/mice" = "mice", "Python/sklearn" = "sklearn"),
-          selected = "mice"
+          ns("imputation_model"),
+          "Model",
+          choices = c(
+            "Auto" = "auto",
+            "ARIMA" = "arima",
+            "XGBoost" = "xgboost",
+            "Random Forest" = "rf",
+            "kNN" = "knn",
+            "LightGBM" = "lightgbm"
+          ),
+          selected = "auto"
         )
       ),
-      shiny::column(2, shiny::numericInput(ns("imputation_interval_minutes"), "Interval minutes", value = 5, min = 1, step = 1)),
-      shiny::column(2, shiny::numericInput(ns("imputation_arima_threshold"), "ARIMA threshold", value = 0.05, min = 0, max = 1, step = 0.01)),
-      shiny::column(2, shiny::numericInput(ns("imputation_arima_min_history"), "ARIMA min history", value = 20, min = 1, step = 1)),
-      shiny::column(2, shiny::numericInput(ns("imputation_xgb_rounds"), "XGBoost rounds", value = 300, min = 1, step = 10))
+      shiny::column(
+        2,
+        shiny::br(),
+        shiny::actionButton(
+          ns("run_imputation"),
+          label = "Run imputation",
+          icon = shiny::icon("play"),
+          class = "btn-primary"
+        )
+      )
     )
   )
 }
 
+normalize_imputation_integer_vector <- function(x, default, length_required = NULL) {
+  if (is.null(x) || !nzchar(trimws(as.character(x)))) {
+    return(default)
+  }
+  values <- suppressWarnings(as.integer(strsplit(as.character(x), "[, ]+")[[1L]]))
+  values <- values[!is.na(values)]
+  if (!length(values)) {
+    return(default)
+  }
+  if (!is.null(length_required) && length(values) != length_required) {
+    return(default)
+  }
+  values
+}
+
+normalize_imputation_boundary <- function(x) {
+  if (is.null(x) || length(x) == 0L || is.na(x[[1L]])) {
+    return(NULL)
+  }
+  as.character(x[[1L]])
+}
+
+imputation_run_status_ui <- function(status, selected_method = "none") {
+  if (!identical(selected_method %||% "none", "mice_only")) {
+    return(NULL)
+  }
+  status <- status %||% list(state = "not_run")
+  state <- status$state %||% "not_run"
+  message <- status$message %||% switch(
+    state,
+    running = "Imputation is running. Analysis tabs continue to use the current non-imputed data until it completes.",
+    complete = "Imputation is complete. Analysis tabs are using the imputed dataset.",
+    stale = "Imputation settings changed. Analysis tabs are using the previous non-imputed or cached data until imputation is run again.",
+    failed = "Imputation failed. Analysis tabs are using the non-imputed dataset.",
+    "Imputation has not been run for the current dataset. Analysis tabs are using non-imputed data."
+  )
+  class <- switch(
+    state,
+    running = "alert alert-info",
+    complete = "alert alert-success",
+    stale = "alert alert-warning",
+    failed = "alert alert-danger",
+    "alert alert-light border"
+  )
+  shiny::div(class = class, style = "margin-top: 10px; margin-bottom: 0;", message)
+}
+
 preprocessing_module_server <- function(id, mapping, standardized) {
   shiny::moduleServer(id, function(input, output, session) {
+    imputation_status <- shiny::reactiveVal(list(
+      state = "not_run",
+      message = "Imputation has not been run for the current dataset. Analysis tabs are using non-imputed data."
+    ))
+
     output$analysis_date_range_ui <- shiny::renderUI({
       range <- available_analysis_date_range(standardized())
       if (is.na(range[["start"]]) || is.na(range[["end"]])) {
@@ -89,17 +154,38 @@ preprocessing_module_server <- function(id, mapping, standardized) {
         date_range <- normalize_analysis_date_range(input$analysis_date_range, standardized())
         filter_analysis_date_range(standardized(), date_range)
       }, shiny.silent.error = function(error) NULL, error = function(error) NULL)
-      imputation_summary_box_ui(imputation_missingness_summary(
-        data,
-        interval_minutes = input$imputation_interval_minutes %||% 5L
-      ))
+      interval_minutes <- input$imputation_interval_minutes %||% 5L
+      precomputed <- if (is.data.frame(data) && nrow(data) && all(c("id", "timestamp", "glucose") %in% names(data))) {
+        tryCatch(
+          cgm_timed(
+            "data_imputation_summary_precompute",
+            missingness_precompute(data, interval_minutes = interval_minutes)
+          ),
+          error = function(error) NULL
+        )
+      } else {
+        NULL
+      }
+      summary <- cgm_timed(
+        "data_imputation_candidate_summary",
+        imputation_missingness_summary(
+          data,
+          interval_minutes = interval_minutes,
+          precomputed = precomputed
+        )
+      )
+      imputation_summary_box_ui(summary)
     })
 
     output$imputation_options_ui <- shiny::renderUI({
       imputation_options_ui(input$imputation %||% "none", ns = session$ns)
     })
 
-    shiny::reactive({
+    output$imputation_run_status <- shiny::renderUI({
+      imputation_run_status_ui(imputation_status(), input$imputation %||% "none")
+    })
+
+    settings <- shiny::reactive({
       thresholds <- list(
         tbr_level2 = input$tbr_level2,
         tir_lower = input$tir_lower,
@@ -117,16 +203,33 @@ preprocessing_module_server <- function(id, mapping, standardized) {
         analysis_date_range = date_range,
         expected_study_duration_days = expected_duration_days,
         imputation_method = input$imputation,
-        imputation_model = "mice_only",
-        imputation_seed = input$imputation_seed %||% 42,
+        imputation_model = input$imputation_model %||% "auto",
+        imputation_seed = 42L,
         imputation_available = cgmissingdata_available(),
-        imputation_backend = input$imputation_backend %||% "mice",
-        imputation_interval_minutes = input$imputation_interval_minutes %||% 5L,
-        imputation_arima_threshold = input$imputation_arima_threshold %||% 0.05,
-        imputation_arima_min_history = input$imputation_arima_min_history %||% 20L,
-        imputation_xgb_rounds = input$imputation_xgb_rounds %||% 300L,
+        imputation_backend = "mice",
+        imputation_interval_minutes = 5L,
+        imputation_missing_warning_threshold = 0.20,
+        imputation_arima_threshold = 0.05,
+        imputation_arima_order = c(4L, 1L, 0L),
+        imputation_arima_min_history = 20L,
+        imputation_xgb_rounds = 300L,
+        imputation_rf_trees = 200L,
+        imputation_knn_k = 7L,
+        imputation_lgb_rounds = 400L,
+        imputation_lag_values = c(1L, 2L, 3L),
+        imputation_add_rollmean = TRUE,
+        imputation_roll_window = 3L,
+        imputation_study_start = date_range[["start"]],
+        imputation_study_end = date_range[["end"]],
         selected_metrics = "core"
       )
     })
+    attr(settings, "imputation_run") <- shiny::reactive(input$run_imputation %||% 0L)
+    attr(settings, "imputation_status") <- shiny::reactive(imputation_status())
+    attr(settings, "set_imputation_status") <- function(status) {
+      imputation_status(status)
+      invisible(NULL)
+    }
+    settings
   })
 }

@@ -1070,6 +1070,56 @@ filter_complexity_data <- function(data, subject = "", group = "") {
   data
 }
 
+complexity_filtered_subject_ids <- function(data, subject = "", group = "") {
+  if (!is.data.frame(data) || !"id" %in% names(data)) {
+    return(character())
+  }
+  data <- filter_complexity_data(data, subject = subject, group = group)
+  subject_id_values(data)
+}
+
+filter_complexity_results <- function(results, data = NULL, subject = "", group = "") {
+  if (!is.data.frame(results) || !nrow(results) || !"id" %in% names(results)) {
+    return(results)
+  }
+  subject <- normalize_filter_value(subject)
+  group <- normalize_filter_value(group)
+  if (!nzchar(subject) && !nzchar(group)) {
+    return(results)
+  }
+  ids <- complexity_filtered_subject_ids(data, subject = subject, group = group)
+  if (!length(ids)) {
+    return(results[0L, , drop = FALSE])
+  }
+  results[as.character(results$id) %in% ids, , drop = FALSE]
+}
+
+filter_complexity_curves <- function(curves, data = NULL, subject = "", group = "") {
+  if (!is.data.frame(curves) || !nrow(curves) || !"id" %in% names(curves)) {
+    return(curves)
+  }
+  subject <- normalize_filter_value(subject)
+  group <- normalize_filter_value(group)
+  if (!nzchar(subject) && !nzchar(group)) {
+    return(curves)
+  }
+  ids <- complexity_filtered_subject_ids(data, subject = subject, group = group)
+  if (!length(ids)) {
+    return(curves[0L, , drop = FALSE])
+  }
+  curves[as.character(curves$id) %in% ids, , drop = FALSE]
+}
+
+complexity_compute_key <- function(data, parameters) {
+  paste(
+    utils::capture.output(utils::str(list(
+      data = cgm_data_signature(data),
+      parameters = parameters
+    ))),
+    collapse = "\n"
+  )
+}
+
 complexity_group_lookup <- function(data) {
   if (!is.data.frame(data) || !"id" %in% names(data) || !"group" %in% names(data)) {
     return(NULL)
@@ -1088,7 +1138,7 @@ complexity_group_lookup <- function(data) {
   stats::setNames(values$group, values$id)
 }
 
-prepare_complexity_metrics_display <- function(results, data = NULL) {
+prepare_complexity_metrics_display <- function(results, data = NULL, show_subject_id = NULL) {
   catalog <- complexity_metric_catalog()
   if (!is.data.frame(results) || !nrow(results)) {
     return(data.frame(
@@ -1143,15 +1193,15 @@ prepare_complexity_metrics_display <- function(results, data = NULL) {
   if ("Group" %in% names(out)) {
     out <- out[, c("Subject ID", "Group", setdiff(names(out), c("Subject ID", "Group"))), drop = FALSE]
   }
-  if (!is.null(data) && !subject_id_filter_available(data)) {
+  if (!is.null(data) && !show_subject_id_for_display(data, show_subject_id)) {
     out <- out[, setdiff(names(out), "Subject ID"), drop = FALSE]
   }
   row.names(out) <- NULL
   out
 }
 
-prepare_complexity_export <- function(results, curves = NULL, data = NULL) {
-  scalar <- prepare_complexity_metrics_display(results, data)
+prepare_complexity_export <- function(results, curves = NULL, data = NULL, show_subject_id = NULL) {
+  scalar <- prepare_complexity_metrics_display(results, data, show_subject_id = show_subject_id)
   if (nrow(scalar)) {
     scalar$Output <- "Scalar metric"
     scalar$`Scale variable` <- ""
@@ -1177,7 +1227,7 @@ prepare_complexity_export <- function(results, curves = NULL, data = NULL) {
     ), drop = FALSE]
   }
 
-  scale_values <- prepare_complexity_curve_plot_data(curves, data)
+  scale_values <- prepare_complexity_curve_plot_data(curves, data, show_subject_id = show_subject_id)
   if (nrow(scale_values)) {
     scale_values$Output <- "Scale curve"
     scale_values$Metric <- scale_values[["Curve metric"]]
@@ -1288,7 +1338,12 @@ complexity_metric_note <- function(result, metric) {
   }
 }
 
-prepare_complexity_plot_data <- function(results, data = NULL, metric = all_filter_value()) {
+prepare_complexity_plot_data <- function(
+  results,
+  data = NULL,
+  metric = all_filter_value(),
+  show_subject_id = NULL
+) {
   catalog <- complexity_metric_catalog()
   if (!is.data.frame(results) || !nrow(results)) {
     return(data.frame(
@@ -1302,7 +1357,7 @@ prepare_complexity_plot_data <- function(results, data = NULL, metric = all_filt
     ))
   }
 
-  show_subject_id <- is.null(data) || subject_id_filter_available(data)
+  show_subject_id <- is.null(data) || show_subject_id_for_display(data, show_subject_id)
   group_lookup <- complexity_group_lookup(data)
   rows <- lapply(seq_len(nrow(results)), function(i) {
     result <- results[i, , drop = FALSE]
@@ -1355,7 +1410,12 @@ prepare_complexity_plot_data <- function(results, data = NULL, metric = all_filt
   out
 }
 
-prepare_complexity_curve_plot_data <- function(curves, data = NULL, curve_metric = all_filter_value()) {
+prepare_complexity_curve_plot_data <- function(
+  curves,
+  data = NULL,
+  curve_metric = all_filter_value(),
+  show_subject_id = NULL
+) {
   if (!is.data.frame(curves) || !nrow(curves)) {
     return(data.frame(
       `Subject ID` = character(),
@@ -1388,7 +1448,7 @@ prepare_complexity_curve_plot_data <- function(curves, data = NULL, curve_metric
       check.names = FALSE
     ))
   }
-  show_subject_id <- is.null(data) || subject_id_filter_available(data)
+  show_subject_id <- is.null(data) || show_subject_id_for_display(data, show_subject_id)
   group_lookup <- complexity_group_lookup(data)
   subject_ids <- as.character(curves$id)
   catalog <- complexity_curve_catalog()
@@ -1444,8 +1504,8 @@ prepare_complexity_curve_plot_data <- function(curves, data = NULL, curve_metric
   out[, keep, drop = FALSE]
 }
 
-prepare_mse_curve_plot_data <- function(curves, data = NULL) {
-  prepare_complexity_curve_plot_data(curves, data, curve_metric = "mse")
+prepare_mse_curve_plot_data <- function(curves, data = NULL, show_subject_id = NULL) {
+  prepare_complexity_curve_plot_data(curves, data, curve_metric = "mse", show_subject_id = show_subject_id)
 }
 
 create_complexity_summary_plot <- function(plot_data, metric = all_filter_value()) {

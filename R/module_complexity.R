@@ -94,6 +94,7 @@ complexity_module_ui <- function(id) {
 
 complexity_loading_ui <- function(message = "Complexity metrics are calculating.") {
   shiny::div(
+    class = "complexity-loading",
     style = "display:flex; align-items:center; gap:12px; min-height:96px;",
     shiny::tags$style("@keyframes cgm-complexity-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }"),
     shiny::div(style = "width:28px; height:28px; border:4px solid #d9edf7; border-top-color:#31708f; border-radius:50%; animation:cgm-complexity-spin 0.8s linear infinite;"),
@@ -103,14 +104,19 @@ complexity_loading_ui <- function(message = "Complexity metrics are calculating.
 
 complexity_module_server <- function(id, standardized, active_tab = NULL) {
   shiny::moduleServer(id, function(input, output, session) {
-    group_filtered_data <- shiny::reactive({
+    compute_data <- shiny::reactive({
+      req_active_tab(active_tab, "complexity")
+      standardized()
+    })
+
+    subject_choices_data <- shiny::reactive({
       req_active_tab(active_tab, "complexity")
       filter_complexity_data(standardized(), group = input$group)
     })
 
     output$subject_filter <- shiny::renderUI({
       req_active_tab(active_tab, "complexity")
-      data <- group_filtered_data()
+      data <- subject_choices_data()
       if (!subject_id_filter_available(data)) {
         return(NULL)
       }
@@ -125,7 +131,7 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
 
     output$group_filter <- shiny::renderUI({
       req_active_tab(active_tab, "complexity")
-      data <- standardized()
+      data <- compute_data()
       if (!plot_filter_available(data, "group", min_values = 2L)) {
         return(NULL)
       }
@@ -149,16 +155,19 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       )
     })
 
-    filtered_data <- shiny::reactive({
+    display_data <- shiny::reactive({
       req_active_tab(active_tab, "complexity")
       filter_complexity_data(standardized(), subject = input$subject, group = input$group)
     })
 
     pending_complexity_results <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "complexity")
-      compute_complexity_pending_summary(filtered_data(), parameters(), status = "running")
+      cgm_timed(
+        "complexity_pending_summary",
+        compute_complexity_pending_summary(compute_data(), parameters(), status = "running")
+      )
     }),
-    cgm_data_signature(filtered_data()),
+    cgm_data_signature(compute_data()),
     parameters()
     )
 
@@ -179,13 +188,7 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
     complexity_state$mse_planned <- FALSE
 
     complexity_key <- shiny::reactive({
-      paste(
-        utils::capture.output(utils::str(list(
-          data = cgm_data_signature(filtered_data()),
-          parameters = parameters()
-        ))),
-        collapse = "\n"
-      )
+      complexity_compute_key(compute_data(), parameters())
     })
 
     reset_complexity_job_state <- function() {
@@ -196,6 +199,8 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       complexity_state$mse_pending <- FALSE
       complexity_state$mse_planned <- FALSE
       hurst_status("idle")
+      curve_status("idle")
+      mse_status("idle")
     }
 
     maybe_schedule_complexity_worker_cleanup <- function(key) {
@@ -217,11 +222,72 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       schedule_background_worker_cleanup(complexity_state$worker_token)
     }
 
+    run_quick_job <- function(data, params, key, failed_results) {
+      quick_status("running")
+      complexity_state$worker_token <- configure_background_workers()
+      complexity_state$cleanup_scheduled <- FALSE
+      promise <- promises::future_promise({
+        cgm_timed(
+          "complexity_quick_metrics",
+          compute_complexity_quick_metrics(data, params)
+        )
+      })
+      promises::then(
+        promise,
+        onFulfilled = function(value) {
+          if (!identical(complexity_state$key, key)) {
+            return(NULL)
+          }
+          quick_ok <- is.data.frame(value) && nrow(value) > 0L
+          quick_results <- if (quick_ok) value else failed_results
+          if (quick_ok) {
+            complexity_metrics(merge_complexity_hurst_results(quick_results, NULL, status = "running"))
+            quick_status("complete")
+            eligible_ids <- quick_results$id[quick_results$eligible %in% TRUE]
+            if (length(eligible_ids)) {
+              complexity_state$mse_planned <- TRUE
+              mse_status("running")
+              run_hurst_job(data, params, key)
+              run_dfa_higuchi_curve_job(data, params, key)
+            } else {
+              hurst_status("idle")
+              curve_status("idle")
+              mse_status("idle")
+              maybe_schedule_complexity_worker_cleanup(key)
+            }
+          } else {
+            complexity_metrics(failed_results)
+            quick_status("failed")
+            hurst_status("idle")
+            curve_status("idle")
+            mse_status("idle")
+            maybe_schedule_complexity_worker_cleanup(key)
+          }
+          NULL
+        },
+        onRejected = function(error) {
+          if (identical(complexity_state$key, key)) {
+            complexity_metrics(failed_results)
+            quick_status("failed")
+            hurst_status("idle")
+            curve_status("idle")
+            mse_status("idle")
+            maybe_schedule_complexity_worker_cleanup(key)
+          }
+          NULL
+        }
+      )
+      NULL
+    }
+
     run_hurst_job <- function(data, params, key) {
       complexity_state$hurst_pending <- TRUE
       hurst_status("running")
       promise <- promises::future_promise({
-        compute_complexity_hurst_metrics(data, params)
+        cgm_timed(
+          "complexity_hurst_background",
+          compute_complexity_hurst_metrics(data, params)
+        )
       })
       promises::then(
         promise,
@@ -249,7 +315,10 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       curve_status("running")
       complexity_state$curve_pending <- TRUE
       promise <- promises::future_promise({
-        compute_complexity_dfa_higuchi_curves(data, params)
+        cgm_timed(
+          "complexity_dfa_higuchi_background",
+          compute_complexity_dfa_higuchi_curves(data, params)
+        )
       })
       promises::then(
         promise,
@@ -280,14 +349,17 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       complexity_state$mse_pending <- TRUE
       mse_status("running")
       promise <- promises::future_promise({
-        compute_complexity_mse_curves(
-          data,
-          min_points = params$min_points,
-          entropy_bin_width = params$entropy_bin_width,
-          embedding_dimension = params$embedding_dimension,
-          mse_scale_max = params$mse_scale_max,
-          higuchi_kmax = params$higuchi_kmax,
-          max_gap_intervals = params$max_gap_intervals
+        cgm_timed(
+          "complexity_mse_background",
+          compute_complexity_mse_curves(
+            data,
+            min_points = params$min_points,
+            entropy_bin_width = params$entropy_bin_width,
+            embedding_dimension = params$embedding_dimension,
+            mse_scale_max = params$mse_scale_max,
+            higuchi_kmax = params$higuchi_kmax,
+            max_gap_intervals = params$max_gap_intervals
+          )
         )
       })
       promises::then(
@@ -335,36 +407,10 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       quick_status("running")
       curve_status("idle")
       mse_status("idle")
-      data <- filtered_data()
+      data <- compute_data()
       params <- parameters()
       failed_results <- compute_complexity_pending_summary(data, params, status = "failed")
-      quick_results <- tryCatch(
-        compute_complexity_quick_metrics(data, params),
-        error = function(error) failed_results
-      )
-      if (is.data.frame(quick_results) && nrow(quick_results)) {
-        complexity_metrics(merge_complexity_hurst_results(quick_results, NULL, status = "running"))
-        quick_status("complete")
-        eligible_ids <- quick_results$id[quick_results$eligible %in% TRUE]
-        if (length(eligible_ids)) {
-          complexity_state$worker_token <- configure_background_workers()
-          complexity_state$cleanup_scheduled <- FALSE
-          complexity_state$mse_planned <- TRUE
-          mse_status("running")
-          run_hurst_job(data, params, key)
-          run_dfa_higuchi_curve_job(data, params, key)
-        } else {
-          hurst_status("idle")
-          curve_status("idle")
-          mse_status("idle")
-        }
-      } else {
-        complexity_metrics(failed_results)
-        quick_status("failed")
-        hurst_status("idle")
-        curve_status("idle")
-        mse_status("idle")
-      }
+      run_quick_job(data, params, key, failed_results)
       NULL
     })
 
@@ -372,7 +418,12 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       results <- complexity_metrics()
       status <- quick_status()
       if (identical(status, "complete") && is.data.frame(results) && nrow(results)) {
-        return(results)
+        return(filter_complexity_results(
+          results,
+          compute_data(),
+          subject = input$subject,
+          group = input$group
+        ))
       }
       NULL
     })
@@ -398,6 +449,19 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       out <- do.call(rbind, rows)
       row.names(out) <- NULL
       out
+    })
+
+    displayed_complexity_curves <- shiny::reactive({
+      filter_complexity_curves(
+        complexity_curves(),
+        compute_data(),
+        subject = input$subject,
+        group = input$group
+      )
+    })
+
+    force_subject_id_display <- shiny::reactive({
+      specific_filter_selected(input$subject)
     })
 
     output$summary_cards <- shiny::renderUI({
@@ -465,16 +529,18 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       }
       prepare_complexity_plot_data(
         results,
-        filtered_data(),
-        metric = input$metric %||% all_filter_value()
+        display_data(),
+        metric = input$metric %||% all_filter_value(),
+        show_subject_id = force_subject_id_display()
       )
     })
 
     scale_curve_plot_data <- shiny::reactive({
       prepare_complexity_curve_plot_data(
-        complexity_curves(),
-        filtered_data(),
-        curve_metric = input$curve_metric %||% all_filter_value()
+        displayed_complexity_curves(),
+        display_data(),
+        curve_metric = input$curve_metric %||% all_filter_value(),
+        show_subject_id = force_subject_id_display()
       )
     })
 
@@ -520,9 +586,12 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
           metric = input$metric %||% all_filter_value()
         )
       }
-      plotly::ggplotly(
-        plot,
-        tooltip = "text"
+      cgm_timed(
+        "complexity_plotly_render",
+        plotly::ggplotly(
+          plot,
+          tooltip = "text"
+        )
       )
     })
 
@@ -565,10 +634,22 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
           options = list(dom = "t")
         ))
       }
-      DT::datatable(
-        prepare_complexity_metrics_display(results, filtered_data()),
-        rownames = FALSE,
-        options = list(scrollX = TRUE, pageLength = 10)
+      display <- cgm_timed(
+        "complexity_metrics_display_prepare",
+        prepare_complexity_metrics_display(
+          results,
+          display_data(),
+          show_subject_id = force_subject_id_display()
+        )
+      )
+      cgm_timed(
+        "complexity_metrics_table_dt_render",
+        DT::datatable(
+          display,
+          rownames = FALSE,
+          options = list(scrollX = TRUE, pageLength = 10)
+        ),
+        rows = nrow(display)
       )
     })
 
@@ -577,7 +658,12 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       content = function(file) {
         results <- displayed_complexity_results()
         out <- if (is.data.frame(results) && nrow(results)) {
-          prepare_complexity_export(results, complexity_curves(), filtered_data())
+          prepare_complexity_export(
+            results,
+            displayed_complexity_curves(),
+            display_data(),
+            show_subject_id = force_subject_id_display()
+          )
         } else {
           data.frame(
             Status = quick_status(),

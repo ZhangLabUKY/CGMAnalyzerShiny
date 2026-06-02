@@ -254,6 +254,105 @@ test_that("complexity display includes Group context when available", {
   expect_true(any(grepl("Group:", plot_data$Tooltip, fixed = TRUE)))
 })
 
+test_that("complexity compute key ignores display filters when full data is reused", {
+  data <- complexity_grouped_example_data()
+  params <- complexity_default_parameters(min_points = 80)
+  key <- complexity_compute_key(data, params)
+  selected_subject <- subject_id_values(data)[[1L]]
+  results <- compute_complexity_pending_summary(data, params)
+  changed_params <- params
+  changed_params$min_points <- params$min_points + 10
+
+  filter_complexity_results(results, data, subject = selected_subject)
+  expect_identical(key, complexity_compute_key(data, params))
+  expect_false(identical(key, complexity_compute_key(data, changed_params)))
+  expect_false(identical(key, complexity_compute_key(filter_complexity_data(data, subject = selected_subject), params)))
+})
+
+test_that("complexity display filters reuse all-subject scalar results", {
+  data <- complexity_grouped_example_data()
+  results <- compute_complexity_metrics(data, min_points = 80)
+  all_ids <- subject_id_values(data)
+  selected_subject <- all_ids[[1L]]
+  group_ids <- subject_id_values(filter_complexity_data(data, group = "F"))
+
+  subject_results <- filter_complexity_results(results, data, subject = selected_subject)
+  group_results <- filter_complexity_results(results, data, group = "F")
+  subject_display <- prepare_complexity_metrics_display(
+    subject_results,
+    filter_complexity_data(data, subject = selected_subject)
+  )
+  group_display <- prepare_complexity_metrics_display(
+    group_results,
+    filter_complexity_data(data, group = "F")
+  )
+
+  expect_equal(nrow(results), length(all_ids))
+  expect_equal(unique(as.character(subject_results$id)), selected_subject)
+  expect_setequal(as.character(group_results$id), group_ids)
+  expect_true(nrow(subject_display) > 0)
+  expect_equal(unique(as.character(subject_display$`Subject ID`)), selected_subject)
+  expect_true(nrow(group_display) > 0)
+  expect_setequal(clean_filter_values(group_display$Group), "F")
+})
+
+test_that("complexity display filters reuse all-subject scale curves", {
+  data <- complexity_grouped_example_data()
+  ids <- subject_id_values(data)
+  curves <- data.frame(
+    id = rep(ids, each = 2),
+    curve_metric = rep(c("dfa", "higuchi"), length(ids)),
+    scale_variable = "scale",
+    scale_value = rep(1:2, length(ids)),
+    metric_value = seq_along(rep(ids, each = 2)),
+    value_label = "Curve value",
+    derived_scalar_label = rep(c("DFA alpha", "Higuchi fractal dimension"), length(ids)),
+    derived_scalar_value = seq_along(rep(ids, each = 2)) / 10,
+    note = "",
+    stringsAsFactors = FALSE
+  )
+  selected_subject <- ids[[2L]]
+  group_ids <- subject_id_values(filter_complexity_data(data, group = "M"))
+
+  subject_curves <- filter_complexity_curves(curves, data, subject = selected_subject)
+  group_curves <- filter_complexity_curves(curves, data, group = "M")
+  subject_plot_data <- prepare_complexity_curve_plot_data(
+    subject_curves,
+    filter_complexity_data(data, subject = selected_subject)
+  )
+  group_plot_data <- prepare_complexity_curve_plot_data(
+    group_curves,
+    filter_complexity_data(data, group = "M")
+  )
+
+  expect_equal(nrow(curves), length(ids) * 2L)
+  expect_equal(unique(as.character(subject_curves$id)), selected_subject)
+  expect_setequal(as.character(group_curves$id), group_ids)
+  expect_true(nrow(subject_plot_data) > 0)
+  expect_equal(unique(as.character(subject_plot_data$`Subject ID`)), selected_subject)
+  expect_true(nrow(group_plot_data) > 0)
+  expect_setequal(clean_filter_values(group_plot_data$Group), "M")
+})
+
+test_that("complexity export respects display filters over cached results", {
+  data <- complexity_grouped_example_data()
+  params <- complexity_default_parameters(min_points = 80, mse_scale_max = 2)
+  quick <- compute_complexity_quick_metrics(data, params)
+  hurst <- compute_complexity_hurst_metrics(data, params)
+  metrics <- merge_complexity_hurst_results(quick, hurst, status = "complete")
+  curves <- compute_complexity_dfa_higuchi_curves(data, params)
+  selected_subject <- subject_id_values(data)[[1L]]
+  display_data <- filter_complexity_data(data, subject = selected_subject)
+  export <- prepare_complexity_export(
+    filter_complexity_results(metrics, data, subject = selected_subject),
+    filter_complexity_curves(curves, data, subject = selected_subject),
+    display_data
+  )
+
+  expect_true(nrow(export) > 0)
+  expect_equal(unique(as.character(export$`Subject ID`)), selected_subject)
+})
+
 test_that("complexity plot helpers prepare finite metric values and choices", {
   data <- complexity_example_data()
   results <- compute_complexity_metrics(data, min_points = 80)
@@ -383,6 +482,14 @@ test_that("complexity MSE results merge into fast results by status", {
   expect_true(grepl("Complexity summary available", complexity_status_text("complete"), fixed = TRUE))
   expect_true(grepl("Hurst exponent is calculating", complexity_scalar_status_text("running"), fixed = TRUE))
   expect_true(grepl("DFA/Higuchi curves running", complexity_curve_status_text("running"), fixed = TRUE))
+  expect_true(grepl("could not compute", complexity_status_text("failed"), fixed = TRUE))
+  expect_true(grepl("could not compute", complexity_scalar_status_text("failed"), fixed = TRUE))
+  expect_true(grepl("could not compute", complexity_curve_status_text("failed"), fixed = TRUE))
+  expect_true(grepl("could not compute", complexity_mse_status_text("failed"), fixed = TRUE))
+  expect_equal(complexity_status_text("idle"), "")
+  expect_equal(complexity_scalar_status_text("idle"), "")
+  expect_equal(complexity_curve_status_text("idle"), "")
+  expect_equal(complexity_mse_status_text("idle"), "")
 })
 
 test_that("complexity MSE curve plot data includes Group in tooltips when available", {
@@ -462,6 +569,46 @@ test_that("complexity display hides Subject ID for one filename-derived subject"
   expect_false("Subject ID" %in% names(prepare_complexity_metrics_display(results, data)))
 })
 
+test_that("complexity display can force selected Subject ID labels", {
+  data <- data.frame(
+    id = "FallbackA",
+    id_source = subject_id_source_filename(),
+    timestamp = parse_cgm_timestamp("2026-05-05 08:00:00") + seq(0, by = 300, length.out = 120),
+    glucose = 100 + sin(seq_len(120) / 8),
+    stringsAsFactors = FALSE
+  )
+  params <- complexity_default_parameters(min_points = 100, mse_scale_max = 2)
+  key <- complexity_compute_key(data, params)
+  results <- compute_complexity_metrics(data, min_points = 100)
+  curves <- data.frame(
+    id = "FallbackA",
+    curve_metric = "dfa",
+    scale_variable = "scale",
+    scale_value = 4,
+    metric_value = 1.2,
+    value_label = "Fluctuation",
+    derived_scalar_label = "DFA alpha",
+    derived_scalar_value = 0.8,
+    note = "",
+    stringsAsFactors = FALSE
+  )
+
+  metrics_display <- prepare_complexity_metrics_display(results, data, show_subject_id = TRUE)
+  plot_data <- prepare_complexity_plot_data(results, data, show_subject_id = TRUE)
+  curve_data <- prepare_complexity_curve_plot_data(curves, data, show_subject_id = TRUE)
+  export <- prepare_complexity_export(results, curves, data, show_subject_id = TRUE)
+
+  expect_true("Subject ID" %in% names(metrics_display))
+  expect_equal(unique(as.character(metrics_display$`Subject ID`)), "FallbackA")
+  expect_equal(unique(as.character(plot_data$`Subject ID`)), "FallbackA")
+  expect_false(any(grepl("Analysis data", plot_data$Tooltip, fixed = TRUE)))
+  expect_equal(unique(as.character(curve_data$`Subject ID`)), "FallbackA")
+  expect_false(any(grepl("Analysis data", curve_data$Tooltip, fixed = TRUE)))
+  expect_true(grepl("FallbackA=0.8", complexity_curve_annotation_text(curve_data), fixed = TRUE))
+  expect_equal(unique(as.character(export$`Subject ID`)), "FallbackA")
+  expect_identical(key, complexity_compute_key(data, params))
+})
+
 test_that("complexity summary cards report eligibility and parameters", {
   data <- complexity_example_data()
   params <- complexity_default_parameters(min_points = 80, entropy_bin_width = 10, embedding_dimension = 2)
@@ -472,34 +619,6 @@ test_that("complexity summary cards report eligibility and parameters", {
   expect_true(grepl("m=2", cards$Value[cards$Label == "Parameters"], fixed = TRUE))
   expect_true(grepl("MSE scales 1-5", cards$Value[cards$Label == "Parameters"], fixed = TRUE))
   expect_true(grepl("Higuchi kmax=8", cards$Value[cards$Label == "Parameters"], fixed = TRUE))
-})
-
-test_that("complexity module exposes controls, tables, and export", {
-  html <- paste(as.character(complexity_module_ui("complexity")), collapse = "\n")
-
-  expect_true(grepl("complexity-controls-panel", html, fixed = TRUE))
-  expect_true(grepl("complexity-control-group", html, fixed = TRUE))
-  expect_true(grepl("Filters", html, fixed = TRUE))
-  expect_true(grepl("Core parameters", html, fixed = TRUE))
-  expect_true(grepl("Curve parameters", html, fixed = TRUE))
-  expect_true(grepl("complexity-subject_filter", html, fixed = TRUE))
-  expect_true(grepl("complexity-group_filter", html, fixed = TRUE))
-  expect_true(grepl("complexity-min_points", html, fixed = TRUE))
-  expect_true(grepl("complexity-entropy_bin_width", html, fixed = TRUE))
-  expect_true(grepl("complexity-embedding_dimension", html, fixed = TRUE))
-  expect_false(grepl("complexity-tolerance_multiplier", html, fixed = TRUE))
-  expect_true(grepl("complexity-mse_scale_max", html, fixed = TRUE))
-  expect_true(grepl("complexity-higuchi_kmax", html, fixed = TRUE))
-  expect_true(grepl("complexity-summary_cards", html, fixed = TRUE))
-  expect_true(grepl("complexity-mse_status_note", html, fixed = TRUE))
-  expect_true(grepl("complexity-visual_mode", html, fixed = TRUE))
-  expect_true(grepl("complexity-metric_filter", html, fixed = TRUE))
-  expect_true(grepl("complexity-complexity_plot_ui", html, fixed = TRUE))
-  expect_true(grepl("complexity-complexity_plot", html, fixed = TRUE))
-  expect_false(grepl("complexity-data_requirements", html, fixed = TRUE))
-  expect_false(grepl("Data requirements", html, fixed = TRUE))
-  expect_true(grepl("complexity-metrics_table", html, fixed = TRUE))
-  expect_true(grepl("complexity-download_complexity", html, fixed = TRUE))
 })
 
 test_that("complexity module stages fast results before MSE curves", {

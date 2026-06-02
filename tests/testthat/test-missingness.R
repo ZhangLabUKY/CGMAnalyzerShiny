@@ -133,6 +133,88 @@ test_that("missingness heatmap data is participant-day aggregated", {
   expect_equal(sum(heatmap$estimated_missing_readings), 2)
 })
 
+test_that("missingness precompute preserves direct helper outputs", {
+  standardized <- missingness_fixture()
+  fake_result <- rbind(
+    data.frame(
+      .row_id = seq_len(nrow(standardized)),
+      subject_index = as.integer(factor(standardized$id, levels = unique(standardized$id))),
+      time = format_cgm_timestamp_iso(standardized$timestamp, tz = "UTC"),
+      glucose = standardized$glucose,
+      imputed_glucose_value = ifelse(is.na(standardized$glucose), 123, standardized$glucose),
+      imputation_method = "MICE+ARIMA",
+      missing_rate = 4 / 48,
+      stringsAsFactors = FALSE
+    ),
+    data.frame(
+      .row_id = c(NA_integer_, NA_integer_),
+      subject_index = c(1L, 1L),
+      time = c("2026-05-01T14:00:00", "2026-05-01T15:00:00"),
+      glucose = c(NA_real_, NA_real_),
+      imputed_glucose_value = c(123, 123),
+      imputation_method = "MICE+ARIMA",
+      missing_rate = 4 / 48,
+      stringsAsFactors = FALSE
+    )
+  )
+  analysis <- apply_imputed_glucose(standardized, fake_result)
+  original_precomputed <- missingness_precompute(standardized, interval_minutes = 60)
+  analysis_precomputed <- missingness_precompute(analysis, interval_minutes = 60)
+
+  expect_equal(
+    missingness_grid_summary_by_id(standardized, interval_minutes = 60, precomputed = original_precomputed),
+    missingness_grid_summary_by_id(standardized, interval_minutes = 60)
+  )
+  expect_equal(
+    detect_gap_periods(standardized, interval_minutes = 60, precomputed = original_precomputed),
+    detect_gap_periods(standardized, interval_minutes = 60)
+  )
+  expect_equal(
+    compute_missingness_summary(standardized, valid_day_hours = 14, interval_minutes = 60, precomputed = original_precomputed),
+    compute_missingness_summary(standardized, valid_day_hours = 14, interval_minutes = 60)
+  )
+  expect_equal(
+    compute_missingness_heatmap_data(standardized, interval_minutes = 60, precomputed = original_precomputed),
+    compute_missingness_heatmap_data(standardized, interval_minutes = 60)
+  )
+  expect_equal(
+    compute_missingness_calendar_data(standardized, interval_minutes = 60, precomputed = original_precomputed),
+    compute_missingness_calendar_data(standardized, interval_minutes = 60)
+  )
+  expect_equal(
+    compare_missingness_summaries(
+      standardized,
+      analysis,
+      valid_day_hours = 14,
+      include_preprocessing = TRUE,
+      interval_minutes = 60,
+      original_precomputed = original_precomputed,
+      analysis_precomputed = analysis_precomputed
+    ),
+    compare_missingness_summaries(
+      standardized,
+      analysis,
+      valid_day_hours = 14,
+      include_preprocessing = TRUE,
+      interval_minutes = 60
+    )
+  )
+  expect_equal(
+    summarize_imputation_status(
+      standardized,
+      analysis,
+      list(imputation_method = "mice_only", imputation_available = TRUE, imputation_interval_minutes = 60),
+      original_precomputed = original_precomputed,
+      analysis_precomputed = analysis_precomputed
+    ),
+    summarize_imputation_status(
+      standardized,
+      analysis,
+      list(imputation_method = "mice_only", imputation_available = TRUE, imputation_interval_minutes = 60)
+    )
+  )
+})
+
 test_that("daily coverage calendar includes no-data days and coverage details", {
   data <- data.frame(
     id = "A",
@@ -522,8 +604,32 @@ test_that("missingness comparison hides Subject ID for one filename-derived subj
   )
 
   comparison <- compare_missingness_summaries(original, original, valid_day_hours = 14)
+  forced <- compare_missingness_summaries(original, original, valid_day_hours = 14, show_subject_id = TRUE)
 
   expect_false("Subject ID" %in% names(comparison))
+  expect_true("Subject ID" %in% names(forced))
+  expect_equal(forced[["Subject ID"]], "FallbackA")
+})
+
+test_that("missingness calendar tooltips can force selected Subject ID labels", {
+  data <- data.frame(
+    id = "FallbackA",
+    id_source = subject_id_source_filename(),
+    timestamp = parse_cgm_timestamp(c("2026-05-05 08:00:00", "2026-05-05 08:05:00")),
+    glucose = c(100, NA),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    source_file = "FallbackA.csv",
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  default <- compute_missingness_calendar_data(data, interval_minutes = 5)
+  forced <- compute_missingness_calendar_data(data, interval_minutes = 5, show_subject_id = TRUE)
+
+  expect_false(any(grepl("Subject ID: FallbackA", default$tooltip, fixed = TRUE)))
+  expect_true(any(grepl("Subject ID: FallbackA", forced$tooltip, fixed = TRUE)))
 })
 
 test_that("analysis missingness table visibility follows imputation setting", {
@@ -585,10 +691,20 @@ test_that("imputation status reports off, unavailable, no-missing, and applied s
   off <- summarize_imputation_status(standardized, standardized, list(imputation_method = "none", imputation_available = TRUE, imputation_interval_minutes = 60))
   unavailable <- summarize_imputation_status(standardized, standardized, list(imputation_method = "mice_only", imputation_available = FALSE, imputation_interval_minutes = 60))
   not_needed <- summarize_imputation_status(complete, complete, list(imputation_method = "mice_only", imputation_available = TRUE, imputation_interval_minutes = 60))
-  applied <- summarize_imputation_status(standardized, analysis, list(imputation_method = "mice_only", imputation_available = TRUE, imputation_seed = 42, imputation_interval_minutes = 60))
+  applied <- summarize_imputation_status(standardized, analysis, list(
+    imputation_method = "mice_only",
+    imputation_model = "arima",
+    imputation_available = TRUE,
+    imputation_seed = 42,
+    imputation_interval_minutes = 60,
+    imputation_missing_warning_threshold = 0.2
+  ))
   failed <- standardized
   attr(failed, "imputation_error") <- "Python dependency unavailable"
   could_not_apply <- summarize_imputation_status(standardized, failed, list(imputation_method = "mice_only", imputation_available = TRUE, imputation_backend = "sklearn", imputation_interval_minutes = 60))
+  warned <- analysis
+  attr(warned, "imputation_warnings") <- "High missingness exceeds warning threshold"
+  warning_status <- summarize_imputation_status(standardized, warned, list(imputation_method = "mice_only", imputation_model = "xgboost", imputation_available = TRUE, imputation_interval_minutes = 60))
   no_rows_filled <- summarize_imputation_status(gap_only, no_fill_analysis, list(imputation_method = "mice_only", imputation_available = TRUE, imputation_interval_minutes = 5))
 
   expect_equal(off$Status, "Not applied")
@@ -597,7 +713,11 @@ test_that("imputation status reports off, unavailable, no-missing, and applied s
   expect_equal(applied$Status, "Applied")
   expect_equal(could_not_apply$Status, "Could not apply")
   expect_equal(no_rows_filled$Status, "No rows filled")
-  expect_equal(could_not_apply$Backend, "Python/sklearn")
+  expect_equal(applied$Model, "ARIMA")
+  expect_false("Backend" %in% names(could_not_apply))
+  expect_equal(applied[["Missing warning threshold (%)"]], 20)
+  expect_equal(warning_status$Warnings, "High missingness exceeds warning threshold")
+  expect_true(grepl("Warnings:", warning_status$Message, fixed = TRUE))
   expect_true(grepl("Python dependency unavailable", could_not_apply$Message, fixed = TRUE))
   expect_true(grepl("returned no finite imputed glucose", no_rows_filled$Message, fixed = TRUE))
   expect_equal(applied[["Filled glucose rows"]], 4)

@@ -2,17 +2,14 @@ Package: CGMAnalyzerShiny
 Title: Shiny Application for Continuous Glucose Monitoring Analysis
 Version: 0.0.0.9000
 Authors@R: c(
-    person("Shubh", "Saraswat", role = c("aut", "cre"), email = "shubh.saraswat00@gmail.com")
-    )
-Author: Shubh Saraswat [aut, cre]
-Maintainer: Shubh Saraswat <shubh.saraswat00@gmail.com>
-Description: A modular Shiny application for continuous glucose monitoring
+    person("Shubh", "Saraswat", email = "shubh.saraswat00@gmail.com", role = c("cre", "aut", "cph"),
+    comment = c(ORCID = "0009-0009-2359-1484")),
+    person("Xiaohua Douglas", "Zhang", email = "douglas.zhang@uky.edu", role = "aut",
+    comment = c(ORCID = "0000-0002-2486-7931")))
+Description: An interactive Shiny application for continuous glucose monitoring
     data upload, quality control, preprocessing, clinically relevant CGM
     metrics, visual analytics, nonlinear complexity analysis, and statistical
-    comparison. The application prefers CGManalyzer for standard CGM
-    analysis, uses iglu selectively for gaps or validation, and can use a
-    current GitHub version of CGMissingDataR that exports
-    run_missing_glucose_imputation() for missing glucose imputation workflows.
+    comparison. 
 License: GPL (>= 2)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -22,6 +19,9 @@ Depends:
 Imports:
     bslib,
     data.table,
+    CGManalyzer,
+    CGMissingDataR (>= 0.0.2),
+    iglu,
     dplyr,
     DT,
     future,
@@ -38,10 +38,11 @@ Imports:
     tools,
     utils
 Suggests:
-    CGManalyzer,
-    CGMissingDataR,
-    iglu,
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    spelling, 
+    knitr, 
+    rmarkdown, 
+    devtools
 Config/testthat/edition: 3
 LazyData: true
 URL: https://github.com/ZhangLabUKY/CGMAnalyzerShiny

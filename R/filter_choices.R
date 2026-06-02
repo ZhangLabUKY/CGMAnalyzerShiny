@@ -27,6 +27,10 @@ normalize_filter_value <- function(value) {
   }
 }
 
+specific_filter_selected <- function(value) {
+  nzchar(normalize_filter_value(value))
+}
+
 preserve_filter_selection <- function(selected, choices) {
   selected <- selected %||% all_filter_value()
   if (!length(selected)) {

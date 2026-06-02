@@ -136,6 +136,36 @@ test_that("base metric state reports ready, empty range, and mapping states", {
   expect_false(should_start_additional_metrics(needs_mapping))
 })
 
+test_that("metrics module reports empty analysis data through testServer", {
+  empty <- data.frame(
+    id = character(),
+    timestamp = as.POSIXct(character(), tz = "UTC"),
+    glucose = numeric(),
+    units = character(),
+    device = character(),
+    group = character(),
+    source_file = character(),
+    imputed_flag = logical(),
+    stringsAsFactors = FALSE
+  )
+
+  shiny::testServer(
+    metrics_module_server,
+    args = list(
+      standardized = shiny::reactive(empty),
+      settings = shiny::reactive(create_reproducibility_settings()),
+      active_tab = function() "metrics"
+    ),
+    {
+      state <- display_metric_state()
+      expect_equal(state$status, "no_analysis_rows")
+      expect_equal(state$message, "No CGM rows are available for the selected analysis date range.")
+      expect_equal(nrow(metrics()), 0)
+      expect_false(should_start_additional_metrics(state))
+    }
+  )
+})
+
 test_that("base metric state preserves calculation errors without exposing internals", {
   data <- data.frame(
     id = "A",

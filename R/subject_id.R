@@ -43,3 +43,10 @@ subject_id_filter_available <- function(data) {
   }
   has_user_subject_id(data)
 }
+
+show_subject_id_for_display <- function(data = NULL, show_subject_id = NULL) {
+  if (!is.null(show_subject_id)) {
+    return(isTRUE(show_subject_id))
+  }
+  subject_id_filter_available(data)
+}

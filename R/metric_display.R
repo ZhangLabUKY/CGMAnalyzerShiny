@@ -213,10 +213,11 @@ format_metric_value <- function(value, digits) {
 #'
 #' @return Long-format user-facing metrics.
 #' @noRd
-prepare_metrics_display <- function(metrics, thresholds = default_cgm_thresholds()) {
+prepare_metrics_display <- function(metrics, thresholds = default_cgm_thresholds(), show_subject_id = NULL) {
   catalog <- metric_display_catalog(thresholds = thresholds)
   available <- catalog[catalog$raw_name %in% names(metrics), , drop = FALSE]
   id_columns <- metric_identifier_columns(metrics)
+  show_subject_id <- show_subject_id_for_display(metrics, show_subject_id)
 
   if (!nrow(metrics) || !nrow(available)) {
     return(empty_metrics_display())
@@ -233,7 +234,7 @@ prepare_metrics_display <- function(metrics, thresholds = default_cgm_thresholds
       .metric_order = spec$metric_order,
       stringsAsFactors = FALSE
     )
-    if (subject_id_filter_available(metrics)) {
+    if (show_subject_id) {
       out[["Subject ID"]] <- as.character(metrics$id)
     }
     if ("group" %in% id_columns) {

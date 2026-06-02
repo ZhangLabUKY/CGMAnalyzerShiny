@@ -14,6 +14,38 @@ test_that("data signatures change when important data features change", {
   expect_false(identical(threshold_signature(default_cgm_thresholds()), threshold_signature(modifyList(default_cgm_thresholds(), list(tir_upper = 190)))))
 })
 
+test_that("performance timing is disabled by default and can write logs when enabled", {
+  old_enabled <- getOption("CGMA.performance_log")
+  old_file <- getOption("CGMA.performance_log_file")
+  on.exit({
+    options(CGMA.performance_log = old_enabled)
+    options(CGMA.performance_log_file = old_file)
+  }, add = TRUE)
+
+  options(CGMA.performance_log = FALSE, CGMA.performance_log_file = FALSE)
+  expect_false(cgm_performance_log_enabled())
+  expect_equal(cgm_timed("disabled_test", 1 + 1), 2)
+
+  file <- tempfile(fileext = ".csv")
+  options(CGMA.performance_log = TRUE, CGMA.performance_log_file = file)
+  expect_true(cgm_performance_log_enabled())
+  expect_message(
+    value <- cgm_timed("enabled_test", data.frame(x = 1:3)),
+    "\\[CGMA perf\\] enabled_test"
+  )
+  expect_equal(nrow(value), 3)
+  log <- utils::read.csv(file, stringsAsFactors = FALSE)
+  expect_equal(log$label, "enabled_test")
+  expect_equal(log$rows, 3L)
+  expect_equal(log$status, "ok")
+
+  expect_error(cgm_timed("error_test", stop("boom", call. = FALSE)), "boom")
+  log <- utils::read.csv(file, stringsAsFactors = FALSE)
+  error_row <- log[log$label == "error_test", , drop = FALSE]
+  expect_equal(error_row$status, "error")
+  expect_true(grepl("error_message=boom", error_row$context, fixed = TRUE))
+})
+
 test_that("data.table base metrics match legacy one-group summary", {
   data <- data.frame(
     id = rep("A", 4),

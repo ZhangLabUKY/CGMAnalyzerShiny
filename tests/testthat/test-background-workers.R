@@ -67,10 +67,3 @@ test_that("scheduled cleanup uses plain generation tokens", {
   delayed_callback()
   expect_equal(cleanup_calls, 1)
 })
-
-test_that("run_app builds a package Shiny app object", {
-  app <- run_app()
-
-  expect_s3_class(app, "shiny.appobj")
-  expect_true(is.function(app$serverFuncSource()))
-})

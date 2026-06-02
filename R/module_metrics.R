@@ -28,7 +28,10 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
       if (inherits(data, "error")) {
         return(metric_state("base_error", error = conditionMessage(data)))
       }
-      compute_base_metric_state(data, thresholds = settings()$thresholds_mg_dl)
+      cgm_timed(
+        "metrics_base_state",
+        compute_base_metric_state(data, thresholds = settings()$thresholds_mg_dl)
+      )
     })
 
     adapter_metrics <- shiny::reactiveVal(NULL)
@@ -70,7 +73,10 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
       worker_token <- configure_background_workers()
       adapter_state$worker_token <- worker_token
       promise <- promises::future_promise({
-        compute_metric_adapters(data, by = by)
+        cgm_timed(
+          "metrics_adapter_background",
+          compute_metric_adapters(data, by = by)
+        )
       })
       promises::then(
         promise,
@@ -105,7 +111,10 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
       base <- state$base
       adapters <- adapter_metrics()
       if (is.null(adapters) && is_active_tab(active_tab, "export")) {
-        adapters <- compute_metric_adapters(state$data, by = default_metric_groups(state$data))
+        adapters <- cgm_timed(
+          "metrics_adapter_export_sync",
+          compute_metric_adapters(state$data, by = default_metric_groups(state$data))
+        )
         adapter_metrics(adapters)
         adapter_status(if (is.data.frame(adapters) && nrow(adapters)) "complete" else "failed")
       }
@@ -121,8 +130,11 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
         return(state)
       }
       tryCatch({
-        raw_metrics <- metrics()
-        display <- prepare_metrics_display(raw_metrics, thresholds = settings()$thresholds_mg_dl)
+        raw_metrics <- cgm_timed("metrics_merge", metrics())
+        display <- cgm_timed(
+          "metrics_display_prepare",
+          prepare_metrics_display(raw_metrics, thresholds = settings()$thresholds_mg_dl)
+        )
         if (!nrow(display)) {
           return(metric_state("no_analysis_rows", data = state$data, base = raw_metrics, display = display))
         }
@@ -227,11 +239,15 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
 
     output$metrics_table <- DT::renderDT({
       display <- filtered_display()
-      DT::datatable(
-        display,
-        rownames = FALSE,
-        extensions = "RowGroup",
-        options = metrics_table_options(display)
+      cgm_timed(
+        "metrics_table_dt_render",
+        DT::datatable(
+          display,
+          rownames = FALSE,
+          extensions = "RowGroup",
+          options = metrics_table_options(display)
+        ),
+        rows = nrow(display)
       )
     })
 

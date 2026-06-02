@@ -150,14 +150,68 @@ regularize_cgm_timestamp_grid <- function(data, interval_minutes = 5L) {
     return(out)
   }
 
-  split_data <- split(out[finite, , drop = FALSE], as.character(out$id[finite]))
-  expanded <- lapply(split_data, function(subject_data) {
-    if (nrow(subject_data) < 1L) {
-      return(subject_data)
+  dt <- data.table::as.data.table(out[finite, , drop = FALSE])
+  dt[, id := as.character(id)]
+  data.table::setorder(dt, id, timestamp, .original_order)
+  dt[, .anchor_timestamp := min(timestamp, na.rm = TRUE), by = id]
+  dt[, timestamp := .anchor_timestamp +
+    round(as.numeric(difftime(timestamp, .anchor_timestamp, units = "mins")) / interval_minutes) *
+      interval_minutes * 60]
+  dt[, .anchor_timestamp := NULL]
+  data.table::setorder(dt, id, timestamp, na.last = TRUE)
+  dt[, .missing_sort := is.na(glucose)]
+  data.table::setorder(dt, id, timestamp, .missing_sort, .original_order)
+  dt[, .missing_sort := NULL]
+  dt <- dt[!duplicated(dt, by = c("id", "timestamp"))]
+
+  grid <- dt[, list(
+    timestamp = seq(min(timestamp), max(timestamp), by = interval_minutes * 60)
+  ), by = id]
+  expanded_dt <- merge(grid, dt, by = c("id", "timestamp"), all.x = TRUE, sort = FALSE)
+  inserted <- is.na(expanded_dt$.original_order)
+  expanded_dt[, inserted_timestamp_gap := inserted_timestamp_gap %in% TRUE]
+  expanded_dt[, explicit_missing_glucose := explicit_missing_glucose %in% TRUE]
+  expanded_dt[, missing_source := as.character(missing_source)]
+
+  if (any(inserted)) {
+    expanded_dt[inserted, inserted_timestamp_gap := TRUE]
+    expanded_dt[inserted, explicit_missing_glucose := FALSE]
+    expanded_dt[inserted, missing_source := missing_source_gap()]
+    expanded_dt[inserted, glucose := NA_real_]
+    if ("imputed_flag" %in% names(expanded_dt)) {
+      expanded_dt[inserted, imputed_flag := FALSE]
     }
-    regularize_subject_timestamp_grid(subject_data, interval_minutes)
-  })
-  expanded <- do.call(rbind, expanded)
+
+    metadata_cols <- setdiff(
+      names(expanded_dt),
+      c(
+        "id", "timestamp", "glucose", "imputed_flag", "missing_source",
+        "inserted_timestamp_gap", "explicit_missing_glucose", ".original_order"
+      )
+    )
+    for (col in metadata_cols) {
+      lookup <- dt[!is.na(get(col)), {
+        values <- unique(get(col))
+        list(.fill_value = if (length(values) == 1L) values[[1L]] else NA)
+      }, by = id]
+      if (nrow(lookup)) {
+        fill_values <- lookup$.fill_value[match(expanded_dt$id, lookup$id)]
+        fill <- inserted & is.na(expanded_dt[[col]]) & !is.na(fill_values)
+        if (any(fill)) {
+          data.table::set(expanded_dt, which(fill), col, fill_values[fill])
+        }
+      }
+    }
+  }
+
+  explicit <- is.na(expanded_dt$glucose) & !(expanded_dt$inserted_timestamp_gap %in% TRUE)
+  expanded_dt[explicit, explicit_missing_glucose := TRUE]
+  expanded_dt[explicit, missing_source := missing_source_explicit()]
+  expanded_dt[is.na(missing_source), missing_source := missing_source_observed()]
+  if ("units" %in% names(expanded_dt)) {
+    expanded_dt[is.na(units), units := "mg/dL"]
+  }
+  expanded <- as.data.frame(expanded_dt, stringsAsFactors = FALSE)
   remainder <- out[!finite, , drop = FALSE]
   combined <- rbind(expanded, remainder)
   combined <- combined[order(combined$id, combined$timestamp, combined$.original_order), , drop = FALSE]
@@ -166,18 +220,21 @@ regularize_cgm_timestamp_grid <- function(data, interval_minutes = 5L) {
   combined
 }
 
-missingness_grid_summary_by_id <- function(data, interval_minutes = 5L) {
-  expanded <- regularize_cgm_timestamp_grid(data, interval_minutes = interval_minutes)
+empty_missingness_grid_summary <- function() {
+  data.frame(
+    id = character(),
+    expanded_rows = integer(),
+    explicit_missing_glucose = integer(),
+    estimated_missing_readings = integer(),
+    missing_glucose = integer(),
+    missing_glucose_rate = numeric(),
+    stringsAsFactors = FALSE
+  )
+}
+
+missingness_grid_summary_from_expanded <- function(expanded) {
   if (!nrow(expanded)) {
-    return(data.frame(
-      id = character(),
-      expanded_rows = integer(),
-      explicit_missing_glucose = integer(),
-      estimated_missing_readings = integer(),
-      missing_glucose = integer(),
-      missing_glucose_rate = numeric(),
-      stringsAsFactors = FALSE
-    ))
+    return(empty_missingness_grid_summary())
   }
   dt <- data.table::as.data.table(expanded)
   out <- dt[, {
@@ -197,20 +254,8 @@ missingness_grid_summary_by_id <- function(data, interval_minutes = 5L) {
   out
 }
 
-#' Detect timestamp gaps in standardized CGM data
-#'
-#' @param data Standardized CGM data.
-#' @param interval_minutes Expected sampling interval in minutes.
-#'
-#' @return A data frame of detected gap periods.
-#' @noRd
-detect_gap_periods <- function(data, interval_minutes = 5L) {
-  if (!all(c("id", "timestamp", "glucose") %in% names(data))) {
-    stop("Gap detection requires standardized columns: id, timestamp, and glucose.", call. = FALSE)
-  }
-
+gap_periods_from_expanded <- function(expanded, interval_minutes = 5L) {
   interval_minutes <- normalize_interval_minutes(interval_minutes)
-  expanded <- regularize_cgm_timestamp_grid(data, interval_minutes = interval_minutes)
   gap_rows <- expanded[
     expanded$inserted_timestamp_gap %in% TRUE | expanded$missing_source == missing_source_gap(),
     ,
@@ -236,6 +281,53 @@ detect_gap_periods <- function(data, interval_minutes = 5L) {
   out
 }
 
+missingness_precompute <- function(data, interval_minutes = 5L) {
+  interval_minutes <- normalize_interval_minutes(interval_minutes)
+  expanded <- regularize_cgm_timestamp_grid(data, interval_minutes = interval_minutes)
+  grid_summary <- missingness_grid_summary_from_expanded(expanded)
+  gaps <- gap_periods_from_expanded(expanded, interval_minutes = interval_minutes)
+  structure(
+    list(
+      interval_minutes = interval_minutes,
+      expanded = expanded,
+      grid_summary = grid_summary,
+      gaps = gaps
+    ),
+    class = "cgm_missingness_precompute"
+  )
+}
+
+missingness_precompute_or_new <- function(data, interval_minutes = 5L, precomputed = NULL) {
+  if (
+    inherits(precomputed, "cgm_missingness_precompute") &&
+      identical(normalize_interval_minutes(interval_minutes), precomputed$interval_minutes)
+  ) {
+    return(precomputed)
+  }
+  missingness_precompute(data, interval_minutes = interval_minutes)
+}
+
+missingness_grid_summary_by_id <- function(data, interval_minutes = 5L, precomputed = NULL) {
+  precomputed <- missingness_precompute_or_new(data, interval_minutes = interval_minutes, precomputed = precomputed)
+  precomputed$grid_summary
+}
+
+#' Detect timestamp gaps in standardized CGM data
+#'
+#' @param data Standardized CGM data.
+#' @param interval_minutes Expected sampling interval in minutes.
+#'
+#' @return A data frame of detected gap periods.
+#' @noRd
+detect_gap_periods <- function(data, interval_minutes = 5L, precomputed = NULL) {
+  if (!all(c("id", "timestamp", "glucose") %in% names(data))) {
+    stop("Gap detection requires standardized columns: id, timestamp, and glucose.", call. = FALSE)
+  }
+
+  precomputed <- missingness_precompute_or_new(data, interval_minutes = interval_minutes, precomputed = precomputed)
+  precomputed$gaps
+}
+
 #' Compute user-facing missingness summary
 #'
 #' @param data Standardized CGM data.
@@ -244,10 +336,11 @@ detect_gap_periods <- function(data, interval_minutes = 5L) {
 #'
 #' @return A data frame with per-participant missingness summaries.
 #' @noRd
-compute_missingness_summary <- function(data, valid_day_hours = 14, interval_minutes = 5L) {
+compute_missingness_summary <- function(data, valid_day_hours = 14, interval_minutes = 5L, precomputed = NULL) {
   qc <- compute_qc_summary(data, valid_day_hours = valid_day_hours)
-  gaps <- detect_gap_periods(data, interval_minutes = interval_minutes)
-  grid_summary <- missingness_grid_summary_by_id(data, interval_minutes = interval_minutes)
+  precomputed <- missingness_precompute_or_new(data, interval_minutes = interval_minutes, precomputed = precomputed)
+  gaps <- precomputed$gaps
+  grid_summary <- precomputed$grid_summary
 
   if (!nrow(qc)) {
     return(data.frame())
@@ -284,7 +377,13 @@ compute_missingness_summary <- function(data, valid_day_hours = 14, interval_min
   out
 }
 
-compute_missingness_heatmap_data <- function(data, gaps = NULL, interval_minutes = 5L) {
+compute_missingness_heatmap_data <- function(
+  data,
+  gaps = NULL,
+  interval_minutes = 5L,
+  precomputed = NULL,
+  show_subject_id = NULL
+) {
   if (!nrow(data) || !any(is_finite_cgm_timestamp(data$timestamp))) {
     return(data.frame(
       id = character(),
@@ -311,7 +410,8 @@ compute_missingness_heatmap_data <- function(data, gaps = NULL, interval_minutes
     )
   }, by = .(id, date)]
 
-  expanded <- regularize_cgm_timestamp_grid(data, interval_minutes = interval_minutes)
+  precomputed <- missingness_precompute_or_new(data, interval_minutes = interval_minutes, precomputed = precomputed)
+  expanded <- precomputed$expanded
   expanded <- expanded[is_finite_cgm_timestamp(expanded$timestamp), , drop = FALSE]
   expanded_dt <- data.table::as.data.table(expanded)
   expanded_dt[, date := as.Date(timestamp)]
@@ -333,7 +433,7 @@ compute_missingness_heatmap_data <- function(data, gaps = NULL, interval_minutes
   daily$readings[is.na(daily$readings)] <- 0L
 
   if (is.null(gaps)) {
-    gaps <- detect_gap_periods(data, interval_minutes = interval_minutes)
+    gaps <- precomputed$gaps
   }
   if (nrow(gaps)) {
     gap_dt <- data.table::as.data.table(gaps)
@@ -349,7 +449,7 @@ compute_missingness_heatmap_data <- function(data, gaps = NULL, interval_minutes
   daily$estimated_missing_readings[is.na(daily$estimated_missing_readings)] <- 0L
 
   daily <- daily[order(id, date)]
-  subject_prefix <- if (subject_id_filter_available(data)) {
+  subject_prefix <- if (show_subject_id_for_display(data, show_subject_id)) {
     paste0("Subject ID: ", daily$id, "<br>")
   } else {
     ""
@@ -541,9 +641,27 @@ add_compact_calendar_positions <- function(daily, ids) {
   daily
 }
 
-compute_missingness_calendar_data <- function(data, gaps = NULL, date_range = NULL, interval_minutes = 5L) {
+compute_missingness_calendar_data <- function(
+  data,
+  gaps = NULL,
+  date_range = NULL,
+  interval_minutes = 5L,
+  precomputed = NULL,
+  show_subject_id = NULL
+) {
   interval_minutes <- normalize_interval_minutes(interval_minutes)
-  daily <- compute_missingness_heatmap_data(data, gaps = gaps, interval_minutes = interval_minutes)
+  precomputed <- if (!nrow(data) || !"id" %in% names(data)) {
+    NULL
+  } else {
+    missingness_precompute_or_new(data, interval_minutes = interval_minutes, precomputed = precomputed)
+  }
+  daily <- compute_missingness_heatmap_data(
+    data,
+    gaps = gaps,
+    interval_minutes = interval_minutes,
+    precomputed = precomputed,
+    show_subject_id = show_subject_id
+  )
   if (!nrow(data) || !"id" %in% names(data)) {
     return(empty_missingness_calendar_data())
   }
@@ -589,7 +707,7 @@ compute_missingness_calendar_data <- function(data, gaps = NULL, date_range = NU
   )
   daily$coverage_status <- coverage_status(daily$coverage_percent, daily$readings)
   daily$missing_glucose_rate[is.na(daily$missing_glucose_rate) & daily$readings == 0L] <- NA_real_
-  subject_prefix <- if (subject_id_filter_available(data)) {
+  subject_prefix <- if (show_subject_id_for_display(data, show_subject_id)) {
     paste0("Subject ID: ", daily$id, "<br>")
   } else {
     ""
@@ -610,7 +728,7 @@ compute_missingness_calendar_data <- function(data, gaps = NULL, date_range = NU
   add_compact_calendar_positions(daily, ids)
 }
 
-day_coverage_warning_summary <- function(calendar_data, data = NULL) {
+day_coverage_warning_summary <- function(calendar_data, data = NULL, show_subject_id = NULL) {
   if (!is.data.frame(calendar_data) || !nrow(calendar_data)) {
     return(data.frame(
       `Subject ID` = character(),
@@ -628,7 +746,7 @@ day_coverage_warning_summary <- function(calendar_data, data = NULL) {
   ), by = id]
   data.table::setnames(summary, "id", "Subject ID")
   out <- as.data.frame(summary[order(`Subject ID`)], stringsAsFactors = FALSE)
-  if (!is.null(data) && is.data.frame(data) && !subject_id_filter_available(data)) {
+  if (!is.null(data) && is.data.frame(data) && !show_subject_id_for_display(data, show_subject_id)) {
     out <- out[, setdiff(names(out), "Subject ID"), drop = FALSE]
   }
   row.names(out) <- NULL
@@ -717,17 +835,22 @@ compare_missingness_summaries <- function(
   analysis_data,
   valid_day_hours = 14,
   include_preprocessing = FALSE,
-  interval_minutes = 5L
+  interval_minutes = 5L,
+  original_precomputed = NULL,
+  analysis_precomputed = NULL,
+  show_subject_id = NULL
 ) {
   original <- compute_missingness_summary(
     original_data,
     valid_day_hours = valid_day_hours,
-    interval_minutes = interval_minutes
+    interval_minutes = interval_minutes,
+    precomputed = original_precomputed
   )
   analysis <- compute_missingness_summary(
     analysis_data,
     valid_day_hours = valid_day_hours,
-    interval_minutes = interval_minutes
+    interval_minutes = interval_minutes,
+    precomputed = analysis_precomputed
   )
   ids <- sort(unique(c(original$id, analysis$id)))
 
@@ -765,7 +888,7 @@ compare_missingness_summaries <- function(
       stringsAsFactors = FALSE
     )
   }
-  if (!subject_id_filter_available(analysis_data)) {
+  if (!show_subject_id_for_display(analysis_data, show_subject_id)) {
     out <- out[, setdiff(names(out), "Subject ID"), drop = FALSE]
   }
   out
@@ -791,6 +914,22 @@ format_imputation_backend <- function(backend) {
   }
 }
 
+format_imputation_model_choice <- function(model) {
+  if (length(model) == 0L || is.na(model[[1L]]) || !nzchar(as.character(model[[1L]]))) {
+    model <- "auto"
+  }
+  model <- tolower(trimws(as.character(model[[1L]] %||% "auto")))
+  labels <- c(
+    auto = "Auto",
+    arima = "ARIMA",
+    xgboost = "XGBoost",
+    rf = "Random Forest",
+    knn = "kNN",
+    lightgbm = "LightGBM"
+  )
+  unname(labels[[model]] %||% labels[["auto"]])
+}
+
 format_returned_imputation_method <- function(method, fallback = "MICE imputation") {
   method <- method %||% NA_character_
   if (is.na(method) || !nzchar(method)) {
@@ -807,21 +946,32 @@ format_returned_imputation_method <- function(method, fallback = "MICE imputatio
 #'
 #' @return A one-row data frame with imputation status details.
 #' @noRd
-summarize_imputation_status <- function(original_data, analysis_data, settings) {
+summarize_imputation_status <- function(original_data, analysis_data, settings, original_precomputed = NULL, analysis_precomputed = NULL) {
   method <- settings$imputation_method %||% "none"
   available <- isTRUE(settings$imputation_available %||% cgmissingdata_available())
   seed <- settings$imputation_seed %||% NA_integer_
-  backend <- settings$imputation_backend %||% "mice"
   interval_minutes <- settings$imputation_interval_minutes %||% 5L
   imputation_error <- attr(analysis_data, "imputation_error", exact = TRUE)
+  imputation_pending <- attr(analysis_data, "imputation_pending", exact = TRUE)
   returned_method <- attr(analysis_data, "imputation_method", exact = TRUE)
   returned_missing_rate <- attr(analysis_data, "imputation_missing_rate", exact = TRUE)
+  returned_model <- attr(analysis_data, "imputation_model", exact = TRUE) %||% settings$imputation_model %||% "auto"
+  returned_warning_threshold <- attr(analysis_data, "imputation_warning_threshold", exact = TRUE) %||%
+    settings$imputation_missing_warning_threshold %||% 0.20
+  if (length(returned_model) == 0L || is.na(returned_model[[1L]]) || !nzchar(as.character(returned_model[[1L]]))) {
+    returned_model <- settings$imputation_model %||% "auto"
+  }
+  if (!is.numeric(returned_warning_threshold) || !is.finite(returned_warning_threshold[[1L]])) {
+    returned_warning_threshold <- settings$imputation_missing_warning_threshold %||% 0.20
+  }
+  imputation_warnings <- unique(as.character(attr(analysis_data, "imputation_warnings", exact = TRUE) %||% character()))
+  imputation_warnings <- imputation_warnings[nzchar(imputation_warnings)]
   original_summary <- tryCatch(
-    missingness_grid_summary_by_id(original_data, interval_minutes = interval_minutes),
+    missingness_grid_summary_by_id(original_data, interval_minutes = interval_minutes, precomputed = original_precomputed),
     error = function(error) data.frame()
   )
   analysis_summary <- tryCatch(
-    missingness_grid_summary_by_id(analysis_data, interval_minutes = interval_minutes),
+    missingness_grid_summary_by_id(analysis_data, interval_minutes = interval_minutes, precomputed = analysis_precomputed),
     error = function(error) data.frame()
   )
   original_missing <- if (nrow(original_summary)) sum(original_summary$missing_glucose, na.rm = TRUE) else sum(is.na(original_data$glucose))
@@ -830,7 +980,10 @@ summarize_imputation_status <- function(original_data, analysis_data, settings) 
   analysis_rows <- if (nrow(analysis_summary)) sum(analysis_summary$expanded_rows, na.rm = TRUE) else nrow(analysis_data)
   original_missing_percent <- if (original_rows > 0L) round(100 * original_missing / original_rows, 2) else NA_real_
   analysis_missing_percent <- if (analysis_rows > 0L) round(100 * analysis_missing / analysis_rows, 2) else NA_real_
-  gaps <- tryCatch(detect_gap_periods(original_data, interval_minutes = interval_minutes), error = function(error) empty_gap_periods())
+  gaps <- tryCatch(
+    detect_gap_periods(original_data, interval_minutes = interval_minutes, precomputed = original_precomputed),
+    error = function(error) empty_gap_periods()
+  )
   estimated_gap_readings <- if (is.data.frame(gaps) && "estimated_missing_readings" %in% names(gaps)) {
     sum(gaps$estimated_missing_readings, na.rm = TRUE)
   } else {
@@ -851,6 +1004,12 @@ summarize_imputation_status <- function(original_data, analysis_data, settings) 
       "Details:",
       imputation_error
     )
+  } else if (identical(imputation_pending, "not_run")) {
+    status <- "Not run"
+    message <- "Imputation is selected, but it has not been run for the current dataset. Analysis uses the original standardized data."
+  } else if (identical(imputation_pending, "stale")) {
+    status <- "Stale"
+    message <- "Imputation settings or analysis data changed. Run imputation again to refresh imputed analysis data."
   } else if (original_missing == 0L) {
     status <- "Not needed"
     message <- "No explicit missing glucose rows or inferred timestamp-gap candidates were detected, so imputation was not needed. Analysis uses the original standardized data."
@@ -861,6 +1020,9 @@ summarize_imputation_status <- function(original_data, analysis_data, settings) 
     status <- "No rows filled"
     message <- "Imputation ran, but it returned no finite imputed glucose values. Analysis uses the original standardized data."
   }
+  if (length(imputation_warnings)) {
+    message <- paste(message, "Warnings:", paste(imputation_warnings, collapse = " | "))
+  }
 
   data.frame(
     Method = if (identical(method, "mice_only")) {
@@ -868,9 +1030,10 @@ summarize_imputation_status <- function(original_data, analysis_data, settings) 
     } else {
       format_imputation_method(method)
     },
-    Backend = if (identical(method, "mice_only")) format_imputation_backend(backend) else "",
+    Model = if (identical(method, "mice_only")) format_imputation_model_choice(returned_model) else "",
     Status = status,
     Seed = seed,
+    `Missing warning threshold (%)` = if (is.numeric(returned_warning_threshold) && is.finite(returned_warning_threshold)) round(100 * returned_warning_threshold, 2) else NA_real_,
     `Missing rate used by imputation (%)` = if (is.numeric(returned_missing_rate) && is.finite(returned_missing_rate)) round(100 * returned_missing_rate, 2) else NA_real_,
     `Original missing glucose` = original_missing,
     `Original missing glucose (%)` = original_missing_percent,
@@ -878,6 +1041,7 @@ summarize_imputation_status <- function(original_data, analysis_data, settings) 
     `Analysis missing glucose (%)` = analysis_missing_percent,
     `Filled glucose rows` = rows_filled,
     `Estimated missing readings from gaps` = estimated_gap_readings,
+    Warnings = if (length(imputation_warnings)) paste(imputation_warnings, collapse = " | ") else "",
     Message = message,
     check.names = FALSE,
     stringsAsFactors = FALSE
@@ -1035,9 +1199,10 @@ create_missingness_heatmap_plot <- function(
   participant = "",
   date_range = NULL,
   calendar_data = NULL,
-  interval_minutes = 5L
+  interval_minutes = 5L,
+  show_subject_id = NULL
 ) {
-  show_subject_id <- subject_id_filter_available(data)
+  show_subject_id <- show_subject_id_for_display(data, show_subject_id)
   if (is.null(calendar_data)) {
     participant <- normalize_filter_value(participant)
     if (nzchar(participant)) {
@@ -1050,7 +1215,8 @@ create_missingness_heatmap_plot <- function(
       data,
       gaps = gaps,
       date_range = date_range,
-      interval_minutes = interval_minutes
+      interval_minutes = interval_minutes,
+      show_subject_id = show_subject_id
     )
   }
 

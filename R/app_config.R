@@ -20,6 +20,7 @@ default_cgm_thresholds <- function() {
 #' @param analysis_date_range Length-two date range used to scope analysis data.
 #' @param expected_study_duration_days Optional protocol duration in days.
 #' @param imputation_method Imputation method label.
+#' @param imputation_model CGMissingDataR model selection.
 #' @param imputation_backend CGMissingDataR backend, either `mice` or `sklearn`.
 #' @param selected_metrics Character vector of selected metrics.
 #' @param selected_tests Character vector of selected statistical tests.
@@ -34,17 +35,33 @@ create_reproducibility_settings <- function(
   analysis_date_range = c(start = NA_character_, end = NA_character_),
   expected_study_duration_days = NA_integer_,
   imputation_method = "none",
-  imputation_model = "mice_only",
+  imputation_model = "auto",
   imputation_seed = 42,
   imputation_available = cgmissingdata_available(),
   imputation_backend = "mice",
   imputation_interval_minutes = 5L,
+  imputation_missing_warning_threshold = 0.20,
   imputation_arima_threshold = 0.05,
+  imputation_arima_order = c(4L, 1L, 0L),
   imputation_arima_min_history = 20L,
   imputation_xgb_rounds = 300L,
+  imputation_rf_trees = 200L,
+  imputation_knn_k = 7L,
+  imputation_lgb_rounds = 400L,
+  imputation_lag_values = c(1L, 2L, 3L),
+  imputation_add_rollmean = TRUE,
+  imputation_roll_window = 3L,
+  imputation_study_start = NULL,
+  imputation_study_end = NULL,
   selected_metrics = "core",
   selected_tests = character()
 ) {
+  if (is.null(imputation_study_start) && length(analysis_date_range) >= 1L && !is.na(analysis_date_range[[1L]])) {
+    imputation_study_start <- as.character(analysis_date_range[[1L]])
+  }
+  if (is.null(imputation_study_end) && length(analysis_date_range) >= 2L && !is.na(analysis_date_range[[2L]])) {
+    imputation_study_end <- as.character(analysis_date_range[[2L]])
+  }
   list(
     app = "CGMAnalyzerShiny",
     created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
@@ -62,9 +79,19 @@ create_reproducibility_settings <- function(
     imputation_available = imputation_available,
     imputation_backend = imputation_backend,
     imputation_interval_minutes = imputation_interval_minutes,
+    imputation_missing_warning_threshold = imputation_missing_warning_threshold,
     imputation_arima_threshold = imputation_arima_threshold,
+    imputation_arima_order = imputation_arima_order,
     imputation_arima_min_history = imputation_arima_min_history,
     imputation_xgb_rounds = imputation_xgb_rounds,
+    imputation_rf_trees = imputation_rf_trees,
+    imputation_knn_k = imputation_knn_k,
+    imputation_lgb_rounds = imputation_lgb_rounds,
+    imputation_lag_values = imputation_lag_values,
+    imputation_add_rollmean = imputation_add_rollmean,
+    imputation_roll_window = imputation_roll_window,
+    imputation_study_start = imputation_study_start,
+    imputation_study_end = imputation_study_end,
     selected_metrics = selected_metrics,
     selected_tests = selected_tests
   )

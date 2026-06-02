@@ -3,7 +3,7 @@ required_cgm_columns <- function() {
 }
 
 optional_cgm_columns <- function() {
-  c("device", "group")
+  c("device")
 }
 
 clean_mapping_value <- function(x) {
@@ -24,7 +24,10 @@ derive_source_id <- function(filename) {
 }
 
 standardize_upload_mapping <- function(mapping, upload_mode = "single_file") {
+  subject_metadata <- mapping$subject_metadata
+  mapping <- mapping[setdiff(names(mapping), "subject_metadata")]
   mapping <- lapply(mapping, clean_mapping_value)
+  mapping$subject_metadata <- subject_metadata
   if (identical(upload_mode, "multi_file")) {
     mapping$id <- ".source_id"
   }
@@ -64,6 +67,50 @@ validate_mapping <- function(data, mapping, upload_mode = "single_file") {
   }
 
   mapping
+}
+
+blank_metadata_value <- function(x) {
+  is.na(x) | !nzchar(trimws(as.character(x)))
+}
+
+clean_subject_metadata <- function(metadata) {
+  if (is.null(metadata) || !is.data.frame(metadata) || !nrow(metadata)) {
+    return(data.frame(id = character(), stringsAsFactors = FALSE))
+  }
+  out <- as.data.frame(metadata, stringsAsFactors = FALSE)
+  if (!"id" %in% names(out)) {
+    first_name <- names(out)[[1L]]
+    names(out)[names(out) == first_name] <- "id"
+  }
+  out$id <- as.character(out$id)
+  out <- out[!is.na(out$id) & nzchar(trimws(out$id)), , drop = FALSE]
+  out$id <- trimws(out$id)
+  metadata_cols <- setdiff(names(out), "id")
+  if (!length(metadata_cols)) {
+    return(out[, "id", drop = FALSE])
+  }
+  for (col in metadata_cols) {
+    out[[col]] <- trimws(as.character(out[[col]]))
+    out[[col]][blank_metadata_value(out[[col]])] <- NA_character_
+  }
+  keep_cols <- metadata_cols[vapply(metadata_cols, function(col) any(!is.na(out[[col]])), logical(1))]
+  out <- out[, c("id", keep_cols), drop = FALSE]
+  out <- out[!duplicated(out$id), , drop = FALSE]
+  row.names(out) <- NULL
+  out
+}
+
+apply_subject_metadata <- function(data, metadata) {
+  metadata <- clean_subject_metadata(metadata)
+  metadata_cols <- setdiff(names(metadata), "id")
+  if (!length(metadata_cols) || !nrow(data) || !"id" %in% names(data)) {
+    return(data)
+  }
+  matched <- match(as.character(data$id), metadata$id)
+  for (col in metadata_cols) {
+    data[[col]] <- metadata[[col]][matched]
+  }
+  data
 }
 
 #' Parse CGM timestamps
@@ -359,7 +406,6 @@ standardize_cgm_data <- function(
     ),
     units = "mg/dL",
     device = NA_character_,
-    group = NA_character_,
     source_file = source_file,
     imputed_flag = FALSE,
     stringsAsFactors = FALSE
@@ -371,6 +417,7 @@ standardize_cgm_data <- function(
       out[[col]] <- as.character(data[[mapped]])
     }
   }
+  out <- apply_subject_metadata(out, mapping$subject_metadata)
 
   if (".source_file" %in% names(data)) {
     out$source_file <- as.character(data[[".source_file"]])

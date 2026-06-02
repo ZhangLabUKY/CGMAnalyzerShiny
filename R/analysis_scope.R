@@ -79,7 +79,7 @@ expected_study_duration_signature <- function(settings) {
   as.character(normalize_expected_study_duration_days(settings$expected_study_duration_days %||% NA))
 }
 
-study_window_summary <- function(data, expected_duration_days = NA) {
+study_window_summary <- function(data, expected_duration_days = NA, show_subject_id = NULL) {
   expected_duration_days <- normalize_expected_study_duration_days(expected_duration_days)
   if (
     is.null(data) ||
@@ -122,7 +122,7 @@ study_window_summary <- function(data, expected_duration_days = NA) {
   data.table::setnames(summary, "id", "Subject ID")
 
   out <- as.data.frame(summary[order(`Subject ID`)], stringsAsFactors = FALSE)
-  if (!subject_id_filter_available(data)) {
+  if (!show_subject_id_for_display(data, show_subject_id)) {
     out <- out[, setdiff(names(out), "Subject ID"), drop = FALSE]
   }
   row.names(out) <- NULL
@@ -132,13 +132,23 @@ study_window_summary <- function(data, expected_duration_days = NA) {
 imputation_settings_signature <- function(settings) {
   c(
     method = as.character(settings$imputation_method %||% "none"),
-    model = as.character(settings$imputation_model %||% "mice_only"),
+    model = as.character(settings$imputation_model %||% "auto"),
     seed = as.character(settings$imputation_seed %||% 42),
     available = as.character(isTRUE(settings$imputation_available %||% FALSE)),
     backend = as.character(settings$imputation_backend %||% "mice"),
     interval_minutes = as.character(settings$imputation_interval_minutes %||% 5L),
+    missing_warning_threshold = as.character(settings$imputation_missing_warning_threshold %||% 0.20),
     arima_threshold = as.character(settings$imputation_arima_threshold %||% 0.05),
+    arima_order = paste(as.integer(settings$imputation_arima_order %||% c(4L, 1L, 0L)), collapse = ","),
     arima_min_history = as.character(settings$imputation_arima_min_history %||% 20L),
-    xgb_rounds = as.character(settings$imputation_xgb_rounds %||% 300L)
+    xgb_rounds = as.character(settings$imputation_xgb_rounds %||% 300L),
+    rf_trees = as.character(settings$imputation_rf_trees %||% 200L),
+    knn_k = as.character(settings$imputation_knn_k %||% 7L),
+    lgb_rounds = as.character(settings$imputation_lgb_rounds %||% 400L),
+    lag_values = paste(as.integer(settings$imputation_lag_values %||% c(1L, 2L, 3L)), collapse = ","),
+    add_rollmean = as.character(isTRUE(settings$imputation_add_rollmean %||% TRUE)),
+    roll_window = as.character(settings$imputation_roll_window %||% 3L),
+    study_start = as.character(settings$imputation_study_start %||% ""),
+    study_end = as.character(settings$imputation_study_end %||% "")
   )
 }

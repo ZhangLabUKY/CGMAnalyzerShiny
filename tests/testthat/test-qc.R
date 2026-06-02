@@ -138,10 +138,14 @@ test_that("prepare_qc_display hides Subject ID for one filename-derived subject"
     stringsAsFactors = FALSE
   )
 
-  display <- prepare_qc_display(compute_qc_summary(data, valid_day_hours = 1), data)
+  summary <- compute_qc_summary(data, valid_day_hours = 1)
+  display <- prepare_qc_display(summary, data)
+  forced <- prepare_qc_display(summary, data, show_subject_id = TRUE)
 
   expect_false("Subject ID" %in% names(display))
   expect_equal(names(display)[seq_len(2)], c("QC status", "Review notes"))
+  expect_true("Subject ID" %in% names(forced))
+  expect_equal(forced[["Subject ID"]], "OneFile")
 })
 
 test_that("duplicate timestamp note appears only when duplicates exist", {
@@ -178,8 +182,7 @@ test_that("duplicate timestamp note appears only when duplicates exist", {
   expect_match(note$message, "Review duplicate timestamps")
 })
 
-test_that("quality calendar renders through dynamic output container", {
-  html <- paste(as.character(qc_module_ui("qc")), collapse = "\n")
+test_that("quality calendar data drives dynamic plot dimensions", {
   data <- data.frame(
     id = c("A", "A", "B"),
     timestamp = parse_cgm_timestamp(c(
@@ -193,15 +196,12 @@ test_that("quality calendar renders through dynamic output container", {
   calendar <- compute_missingness_calendar_data(data)
   dimensions <- missingness_calendar_dimensions(calendar, show_subject_id = TRUE)
 
-  expect_true(grepl("qc-missingness_heatmap_ui", html, fixed = TRUE))
-  expect_false(grepl("height=\"420px\"", html, fixed = TRUE))
   expect_true(nrow(calendar) >= 2L)
   expect_true(is.numeric(dimensions$height))
   expect_true(dimensions$height > 0)
 })
 
-test_that("quality imputation UI is rendered only when imputation is selected", {
-  qc_html <- paste(as.character(qc_module_ui("qc")), collapse = "\n")
+test_that("quality imputation status is summarized only when imputation is selected", {
   off_settings <- create_reproducibility_settings(imputation_method = "none")
   on_settings <- create_reproducibility_settings(imputation_method = "mice_only")
   status <- summarize_imputation_status(
@@ -210,9 +210,56 @@ test_that("quality imputation UI is rendered only when imputation is selected", 
     on_settings
   )
 
-  expect_true(grepl("qc-imputation_status", qc_html, fixed = TRUE))
-  expect_false(grepl(">Imputation Status<", qc_html, fixed = TRUE))
   expect_false(should_show_analysis_missingness(off_settings))
   expect_true(should_show_analysis_missingness(on_settings))
-  expect_true("Backend" %in% names(status))
+  expect_true("Model" %in% names(status))
+  expect_false("Backend" %in% names(status))
+  expect_true("Missing warning threshold (%)" %in% names(status))
+})
+
+test_that("quality module returns QC summaries for the active Quality tab", {
+  data <- data.frame(
+    id = c("A", "A", "A", "B"),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 08:00:00",
+      "2026-05-05 08:05:00",
+      "2026-05-05 08:30:00",
+      "2026-05-06 08:00:00"
+    )),
+    glucose = c(100, NA, 120, 130),
+    units = "mg/dL",
+    device = NA_character_,
+    group = c("Control", "Control", "Control", "Treatment"),
+    source_file = c("A.csv", "A.csv", "A.csv", "B.csv"),
+    imputed_flag = FALSE,
+    id_source = subject_id_source_mapped(),
+    stringsAsFactors = FALSE
+  )
+  settings <- create_reproducibility_settings(
+    valid_day_hours = 1,
+    analysis_date_range = c(start = as.Date("2026-05-05"), end = as.Date("2026-05-06")),
+    imputation_method = "none"
+  )
+
+  shiny::testServer(
+    qc_module_server,
+    args = list(
+      standardized = shiny::reactive(data),
+      analysis_data = shiny::reactive(data),
+      settings = shiny::reactive(settings),
+      active_tab = function() "quality"
+    ),
+    {
+      summary <- qc_summary()
+      expect_equal(nrow(summary), 2)
+      expect_equal(sum(summary$readings), 4)
+      expect_equal(sum(summary$missing_glucose), 1)
+      expect_true(any(summary$gap_count > 0))
+
+      session$setInputs(missingness_participant = "A")
+      filtered_calendar <- missingness_calendar_data()
+      expect_true(nrow(filtered_calendar) > 0)
+      expect_equal(unique(filtered_calendar$id), "A")
+    }
+  )
 })

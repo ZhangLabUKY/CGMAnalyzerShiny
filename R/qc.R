@@ -205,13 +205,13 @@ apply_qc_display_labels <- function(qc_display) {
   qc_display
 }
 
-prepare_qc_display <- function(qc_summary, source_data = NULL) {
+prepare_qc_display <- function(qc_summary, source_data = NULL, show_subject_id = NULL) {
   out <- add_qc_review_columns(qc_summary)
   if (!nrow(out)) {
     return(apply_qc_display_labels(out))
   }
   if ("id" %in% names(out)) {
-    if (subject_id_filter_available(source_data %||% out)) {
+    if (show_subject_id_for_display(source_data %||% out, show_subject_id)) {
       names(out)[names(out) == "id"] <- "Subject ID"
     } else {
       out$id <- NULL
@@ -220,7 +220,7 @@ prepare_qc_display <- function(qc_summary, source_data = NULL) {
   apply_qc_display_labels(out)
 }
 
-duplicate_timestamp_note <- function(qc_summary, source_data = NULL) {
+duplicate_timestamp_note <- function(qc_summary, source_data = NULL, show_subject_id = NULL) {
   if (
     !is.data.frame(qc_summary) ||
       !nrow(qc_summary) ||
@@ -237,7 +237,7 @@ duplicate_timestamp_note <- function(qc_summary, source_data = NULL) {
   }
 
   affected_subjects <- sum(duplicate_counts > 0L)
-  show_subject_id <- subject_id_filter_available(source_data %||% qc_summary)
+  show_subject_id <- show_subject_id_for_display(source_data %||% qc_summary, show_subject_id)
   message <- if (show_subject_id) {
     paste(
       format_count(total),

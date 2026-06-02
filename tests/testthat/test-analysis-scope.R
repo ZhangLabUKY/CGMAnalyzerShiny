@@ -75,25 +75,67 @@ test_that("expected study duration is stored and summarized per subject", {
   expect_equal(no_expected[["Study window status"]], rep("No expected duration set", 2))
 })
 
+test_that("study window summary can force selected filename-derived Subject ID", {
+  data <- data.frame(
+    id = "FallbackA",
+    id_source = subject_id_source_filename(),
+    timestamp = parse_cgm_timestamp(c("2026-05-05 08:00:00", "2026-05-06 08:00:00")),
+    glucose = c(100, 110),
+    stringsAsFactors = FALSE
+  )
+
+  hidden <- study_window_summary(data)
+  forced <- study_window_summary(data, show_subject_id = TRUE)
+
+  expect_false("Subject ID" %in% names(hidden))
+  expect_true("Subject ID" %in% names(forced))
+  expect_equal(forced[["Subject ID"]], "FallbackA")
+})
+
 test_that("imputation settings are stored and included in signature", {
   settings <- create_reproducibility_settings(
     imputation_method = "mice_only",
+    imputation_model = "auto",
     imputation_backend = "mice",
     imputation_interval_minutes = 5L,
+    imputation_missing_warning_threshold = 0.20,
     imputation_arima_threshold = 0.05,
+    imputation_arima_order = c(4L, 1L, 0L),
     imputation_arima_min_history = 20L,
-    imputation_xgb_rounds = 300L
+    imputation_xgb_rounds = 300L,
+    imputation_rf_trees = 200L,
+    imputation_knn_k = 7L,
+    imputation_lgb_rounds = 400L,
+    imputation_lag_values = c(1L, 2L, 3L),
+    imputation_add_rollmean = TRUE,
+    imputation_roll_window = 3L,
+    imputation_study_start = "2026-05-01",
+    imputation_study_end = "2026-05-14"
   )
   changed <- settings
-  changed$imputation_backend <- "sklearn"
+  changed$imputation_model <- "xgboost"
   changed_interval <- settings
   changed_interval$imputation_interval_minutes <- 10L
+  changed_backend <- settings
+  changed_backend$imputation_backend <- "sklearn"
 
+  expect_equal(settings$imputation_model, "auto")
   expect_equal(settings$imputation_backend, "mice")
   expect_equal(settings$imputation_interval_minutes, 5L)
+  expect_equal(settings$imputation_missing_warning_threshold, 0.20)
   expect_equal(settings$imputation_arima_threshold, 0.05)
+  expect_equal(settings$imputation_arima_order, c(4L, 1L, 0L))
   expect_equal(settings$imputation_arima_min_history, 20L)
   expect_equal(settings$imputation_xgb_rounds, 300L)
+  expect_equal(settings$imputation_rf_trees, 200L)
+  expect_equal(settings$imputation_knn_k, 7L)
+  expect_equal(settings$imputation_lgb_rounds, 400L)
+  expect_equal(settings$imputation_lag_values, c(1L, 2L, 3L))
+  expect_true(settings$imputation_add_rollmean)
+  expect_equal(settings$imputation_roll_window, 3L)
+  expect_equal(settings$imputation_study_start, "2026-05-01")
+  expect_equal(settings$imputation_study_end, "2026-05-14")
   expect_false(identical(imputation_settings_signature(settings), imputation_settings_signature(changed)))
   expect_false(identical(imputation_settings_signature(settings), imputation_settings_signature(changed_interval)))
+  expect_false(identical(imputation_settings_signature(settings), imputation_settings_signature(changed_backend)))
 })
