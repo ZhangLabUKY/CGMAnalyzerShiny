@@ -303,7 +303,8 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
     input$participant,
     input$group,
     plot_day_cache_key(normalized_day()),
-    adaptive_plot_target_points()
+    adaptive_plot_target_points(),
+    cache = "session"
     )
 
     output$active_plot <- plotly::renderPlotly({

@@ -176,7 +176,8 @@ app_server <- function(input, output, session) {
     )
   }),
   cgm_data_signature(standardized()),
-  analysis_date_range_signature(settings())
+  analysis_date_range_signature(settings()),
+  cache = "session"
   )
 
   imputation_cache <- shiny::reactiveVal(NULL)

@@ -5354,7 +5354,7 @@
       "checksum": "8bc3db13af176c99fa8776eac92a0a6f"
     },
     "dev_notes/decisions.md": {
-      "checksum": "9c83effe1d352d23177067e36f6353dc"
+      "checksum": "a03f6d69f8ef17e4a705ac57c7ca8f84"
     },
     "dev_notes/logs/performance-20260531.csv": {
       "checksum": "bc1582797880161479cabd440423f5a5"
@@ -5372,7 +5372,7 @@
       "checksum": "2bde20eb6965ce0bd4dc12a3c97a0d6d"
     },
     "dev_notes/progress.md": {
-      "checksum": "a1afdfbf041cf050e5576474028181f3"
+      "checksum": "6ca3ec97786d12cff38efe03b75eb819"
     },
     "dev_notes/README.md": {
       "checksum": "d636e94addd43467e81f899aecdac6a4"
@@ -5411,7 +5411,7 @@
       "checksum": "4b56cc366d53ef17c949413511f15c6d"
     },
     "R/app_server.R": {
-      "checksum": "91815b114bf6b461abd4f311cf05ad65"
+      "checksum": "88c1a12e00d308cdad811ec4e5d0a885"
     },
     "R/app_ui.R": {
       "checksum": "3dd2852deba1f26a8897e44c91ca0fe7"
@@ -5453,7 +5453,7 @@
       "checksum": "216b00d19d7034f0a1df7ca92cf2a3b2"
     },
     "R/module_complexity.R": {
-      "checksum": "d8270f354f8a2edd789832581754200e"
+      "checksum": "202eb0e312c4b7a793cb7801d2187488"
     },
     "R/module_export.R": {
       "checksum": "b5f423ce61e621b8441ad5216eca41dd"
@@ -5462,13 +5462,13 @@
       "checksum": "49d6f9f94e181294c0bbe2a2611b0f52"
     },
     "R/module_plots.R": {
-      "checksum": "22dd1ba249df8353558937f5a34af034"
+      "checksum": "046194d85581875a109040973d7f9c64"
     },
     "R/module_preprocessing.R": {
       "checksum": "d8aeacee7abece078ed7e0ab88c7d198"
     },
     "R/module_qc.R": {
-      "checksum": "c4e08d71a953b90781fd4bfa45173e4a"
+      "checksum": "715b1c1ecaef5a04bb521e4b466ba0fb"
     },
     "R/module_stats.R": {
       "checksum": "e596f925981d5b43b6206c6ec5adbcc0"

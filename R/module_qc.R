@@ -486,7 +486,8 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
       )
     }),
     cgm_data_signature(analysis_data()),
-    settings()$valid_day_hours
+    settings()$valid_day_hours,
+    cache = "session"
     )
 
     standardized_missingness <- shiny::bindCache(shiny::reactive({
@@ -500,7 +501,8 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
       )
     }),
     cgm_data_signature(standardized()),
-    settings()$imputation_interval_minutes
+    settings()$imputation_interval_minutes,
+    cache = "session"
     )
 
     analysis_missingness <- shiny::bindCache(shiny::reactive({
@@ -514,7 +516,8 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
       )
     }),
     cgm_data_signature(analysis_data()),
-    settings()$imputation_interval_minutes
+    settings()$imputation_interval_minutes,
+    cache = "session"
     )
 
     missingness_comparison <- shiny::bindCache(shiny::reactive({
@@ -536,7 +539,8 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
     cgm_data_signature(analysis_data()),
     settings()$valid_day_hours,
     settings()$imputation_interval_minutes,
-    should_show_analysis_missingness(settings())
+    should_show_analysis_missingness(settings()),
+    cache = "session"
     )
 
     study_window <- shiny::bindCache(shiny::reactive({
@@ -550,7 +554,8 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
       )
     }),
     cgm_data_signature(analysis_data()),
-    expected_study_duration_signature(settings())
+    expected_study_duration_signature(settings()),
+    cache = "session"
     )
 
     imputation_status <- shiny::bindCache(shiny::reactive({
@@ -568,7 +573,8 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
     }),
     cgm_data_signature(standardized()),
     cgm_data_signature(analysis_data()),
-    imputation_settings_signature(settings())
+    imputation_settings_signature(settings()),
+    cache = "session"
     )
 
     gap_periods <- shiny::bindCache(shiny::reactive({
@@ -583,7 +589,8 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
       )
     }),
     cgm_data_signature(analysis_data()),
-    settings()$imputation_interval_minutes
+    settings()$imputation_interval_minutes,
+    cache = "session"
     )
 
     missingness_calendar_all <- shiny::bindCache(shiny::reactive({
@@ -601,7 +608,8 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
     }),
     cgm_data_signature(analysis_data()),
     analysis_date_range_signature(settings()),
-    settings()$imputation_interval_minutes
+    settings()$imputation_interval_minutes,
+    cache = "session"
     )
 
     missingness_calendar_data <- shiny::reactive({

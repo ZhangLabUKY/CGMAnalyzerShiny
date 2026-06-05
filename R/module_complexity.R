@@ -202,7 +202,8 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       )
     }),
     cgm_data_signature(compute_data()),
-    parameters()
+    parameters(),
+    cache = "session"
     )
 
     complexity_metrics <- shiny::reactiveVal(NULL)
