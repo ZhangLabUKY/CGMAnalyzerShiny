@@ -112,6 +112,137 @@ test_that("data upload summary reports compact counts", {
   expect_equal(summary$Value[summary$Label == "Missing glucose"], "1")
 })
 
+test_that("data status strip adds validation state to upload summary", {
+  upload <- list(
+    data = data.frame(time = "2026-05-05 08:00:00", glucose = 100),
+    files = "sample.csv"
+  )
+  mapping <- list(timestamp = "time", glucose = "glucose", source_units = "mg/dL")
+  standardized <- data.frame(
+    id = "sample",
+    timestamp = parse_cgm_timestamp("2026-05-05 08:00:00"),
+    glucose = 100,
+    stringsAsFactors = FALSE
+  )
+  settings <- list(analysis_date_range = c(start = "2026-05-05", end = "2026-05-05"))
+
+  summary <- data_status_summary(upload, mapping, standardized, settings = settings)
+  html <- paste(as.character(data_status_strip_ui(upload, mapping, standardized, settings = settings)), collapse = "\n")
+
+  expect_true("Validation" %in% summary$Label)
+  expect_equal(summary$Value[summary$Label == "Validation"], "Ready")
+  expect_true(grepl("Current dataset", html, fixed = TRUE))
+  expect_true(grepl("cgm-data-status-strip", html, fixed = TRUE))
+})
+
+test_that("app UI includes dynamic version badge and theme CSS", {
+  description_path <- system.file("DESCRIPTION", package = "CGMAnalyzerShiny")
+  expected_version <- paste0(
+    "v",
+    as.character(read.dcf(description_path, fields = "Version")[[1L]])
+  )
+  ui <- app_ui()
+  brand_html <- paste(as.character(app_brand_ui()), collapse = "\n")
+  css_html <- paste(as.character(app_theme_css()), collapse = "\n")
+
+  expect_true(file.exists(description_path))
+  expect_s3_class(ui, "shiny.tag.list")
+  expect_equal(app_version_label(), expected_version)
+  expect_true(grepl("cgm-brand-stack", brand_html, fixed = TRUE))
+  expect_true(grepl("cgm-version-label", brand_html, fixed = TRUE))
+  expect_true(grepl(expected_version, brand_html, fixed = TRUE))
+  expect_true(grepl("CGMAnalyzerShiny theme polish", css_html, fixed = TRUE))
+  expect_true(file.exists(app_theme_css_path()))
+})
+
+test_that("data workflow tabs render the expected stages", {
+  html <- paste(as.character(data_workflow_tabs_ui(
+    setup_ui = shiny::div(id = "setup-marker"),
+    validate_ui = shiny::div(id = "validate-marker"),
+    impute_ui = shiny::div(id = "impute-marker"),
+    preview_ui = shiny::div(id = "preview-marker")
+  )), collapse = "\n")
+
+  expect_true(grepl("cgm-data-workflow", html, fixed = TRUE))
+  expect_true(grepl("data_stage_tabs", html, fixed = TRUE))
+  expect_true(grepl("Setup", html, fixed = TRUE))
+  expect_true(grepl("Validate", html, fixed = TRUE))
+  expect_true(grepl("Impute", html, fixed = TRUE))
+  expect_true(grepl("Preview", html, fixed = TRUE))
+  expect_true(grepl("setup-marker", html, fixed = TRUE))
+  expect_true(grepl("preview-marker", html, fixed = TRUE))
+})
+
+test_that("preprocessing settings and imputation UI can render separately", {
+  settings_html <- paste(as.character(preprocessing_settings_ui("preprocessing")), collapse = "\n")
+  imputation_html <- paste(as.character(preprocessing_imputation_ui("preprocessing")), collapse = "\n")
+
+  expect_true(grepl("preprocessing-tir_lower", settings_html, fixed = TRUE))
+  expect_true(grepl("preprocessing-analysis_date_range_ui", settings_html, fixed = TRUE))
+  expect_true(grepl("preprocessing-expected_study_duration_days", settings_html, fixed = TRUE))
+  expect_false(grepl("preprocessing-imputation", settings_html, fixed = TRUE))
+  expect_true(grepl("preprocessing-imputation", imputation_html, fixed = TRUE))
+  expect_true(grepl("preprocessing-imputation_summary", imputation_html, fixed = TRUE))
+  expect_false(grepl("preprocessing-tir_lower", imputation_html, fixed = TRUE))
+})
+
+test_that("metrics module UI renders dashboard sections without tabsets", {
+  html <- paste(as.character(metrics_module_ui("metrics")), collapse = "\n")
+
+  expect_true(grepl("cgm-metrics-dashboard", html, fixed = TRUE))
+  expect_true(grepl("cgm-metrics-overview", html, fixed = TRUE))
+  expect_true(grepl("cgm-dashboard-section", html, fixed = TRUE))
+  expect_true(grepl("cgm-metrics-filter-bar", html, fixed = TRUE))
+  expect_true(grepl("metrics-summary_cards", html, fixed = TRUE))
+  expect_true(grepl("metrics-optional_metric_note", html, fixed = TRUE))
+  expect_true(grepl("metrics-participant_filter", html, fixed = TRUE))
+  expect_true(grepl("metrics-category_filter", html, fixed = TRUE))
+  expect_true(grepl("metrics-group_filter", html, fixed = TRUE))
+  expect_true(grepl("metrics-metrics_empty_state", html, fixed = TRUE))
+  expect_true(grepl("metrics-metrics_table", html, fixed = TRUE))
+  expect_false(grepl("tabset", html, ignore.case = TRUE))
+  expect_false(grepl("nav-tabs", html, fixed = TRUE))
+})
+
+test_that("complexity module UI renders dashboard sections without inline CSS or tabsets", {
+  html <- paste(as.character(complexity_module_ui("complexity")), collapse = "\n")
+
+  expect_true(grepl("cgm-complexity-dashboard", html, fixed = TRUE))
+  expect_true(grepl("cgm-complexity-controls-section", html, fixed = TRUE))
+  expect_true(grepl("cgm-complexity-visual-filter-bar", html, fixed = TRUE))
+  expect_true(grepl("cgm-complexity-table-section", html, fixed = TRUE))
+  expect_true(grepl("complexity-summary_cards", html, fixed = TRUE))
+  expect_true(grepl("complexity-mse_status_note", html, fixed = TRUE))
+  expect_true(grepl("complexity-subject_filter", html, fixed = TRUE))
+  expect_true(grepl("complexity-group_filter", html, fixed = TRUE))
+  expect_true(grepl("complexity-metric_filter", html, fixed = TRUE))
+  expect_true(grepl("complexity-curve_filter", html, fixed = TRUE))
+  expect_true(grepl("complexity-complexity_plot_ui", html, fixed = TRUE))
+  expect_true(grepl("complexity-metrics_table_ui", html, fixed = TRUE))
+  expect_true(grepl("complexity-download_complexity", html, fixed = TRUE))
+  expect_false(grepl("<style", html, fixed = TRUE))
+  expect_false(grepl("tabset", html, ignore.case = TRUE))
+  expect_false(grepl("nav-tabs", html, fixed = TRUE))
+})
+
+test_that("plots module UI renders dashboard visual section without tabsets", {
+  html <- paste(as.character(plots_module_ui("plots")), collapse = "\n")
+
+  expect_true(grepl("cgm-plots-dashboard", html, fixed = TRUE))
+  expect_true(grepl("cgm-plots-overview", html, fixed = TRUE))
+  expect_true(grepl("cgm-plots-visual-section", html, fixed = TRUE))
+  expect_true(grepl("cgm-plots-header-actions", html, fixed = TRUE))
+  expect_true(grepl("plots-filter_layout", html, fixed = TRUE))
+  expect_true(grepl("plots-plot_summary", html, fixed = TRUE))
+  expect_true(grepl("plots-active_plot", html, fixed = TRUE))
+  expect_true(grepl("plots-download_plot", html, fixed = TRUE))
+  expect_true(grepl("cgm-plots-summary", html, fixed = TRUE))
+  expect_true(grepl("cgm-plot-panel", html, fixed = TRUE))
+  expect_false(grepl("<style", html, fixed = TRUE))
+  expect_false(grepl("tabset", html, ignore.case = TRUE))
+  expect_false(grepl("nav-tabs", html, fixed = TRUE))
+})
+
 test_that("imputation missingness summary reports severity and affected subjects", {
   data <- data.frame(
     id = rep(c("A", "B"), each = 50),
@@ -202,6 +333,7 @@ test_that("imputation summary includes per-subject rows for multiple Subject IDs
   expect_equal(by_subject[["Subject ID"]], c("A", "B"))
   expect_equal(by_subject[["Missing glucose values"]], c(4L, 0L))
   expect_true(grepl("Missingness by Subject ID", html, fixed = TRUE))
+  expect_true(grepl("cgm-scroll-table", html, fixed = TRUE))
   expect_true(grepl("Missing glucose values include uploaded blank glucose values", html, fixed = TRUE))
 })
 
@@ -354,10 +486,12 @@ test_that("quality summary cards use QC and missingness values", {
   expect_equal(cards$Value[cards$Label == "Valid days"], "3")
   expect_equal(cards$Value[cards$Label == "Timestamp gaps"], "5")
   expect_equal(cards$Value[cards$Label == "Filled rows"], "1")
-  expect_equal(cards$Value[cards$Label == "Expected duration"], "4 days")
-  expect_equal(cards$Value[cards$Label == "Short study windows"], "1")
-  expect_equal(cards$Value[cards$Label == "Full missing days"], "1")
-  expect_equal(cards$Value[cards$Label == "Low coverage days"], "2")
+  expect_false(any(c(
+    "Expected duration",
+    "Short study windows",
+    "Full missing days",
+    "Low coverage days"
+  ) %in% cards$Label))
 })
 
 test_that("plot selection summary respects daily overlay day filtering", {

@@ -1,105 +1,139 @@
 complexity_module_ui <- function(id) {
   ns <- shiny::NS(id)
-  shiny::tagList(
-    shiny::h3("Complexity analytics"),
-    shiny::p("Complexity metrics describe regularity and long-range structure in glucose patterns after the current preprocessing choices are applied."),
-    shiny::tags$style(
-      "
-      .complexity-controls-panel {
-        display: grid;
-        grid-template-columns: minmax(220px, 0.9fr) minmax(360px, 1.5fr) minmax(220px, 0.8fr);
-        gap: 16px;
-        align-items: start;
-        margin: 12px 0 18px;
-      }
-      .complexity-control-group {
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        padding: 12px 14px 6px;
-        background: #fff;
-      }
-      .complexity-control-group h4 {
-        margin: 0 0 10px;
-        font-size: 15px;
-        font-weight: 600;
-      }
-      .complexity-control-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(140px, 1fr));
-        gap: 10px 14px;
-      }
-      .complexity-control-grid .form-group {
-        margin-bottom: 8px;
-      }
-      @media (max-width: 1100px) {
-        .complexity-controls-panel {
-          grid-template-columns: 1fr;
-        }
-      }
-      @media (max-width: 650px) {
-        .complexity-control-grid {
-          grid-template-columns: 1fr;
-        }
-      }
-      "
-    ),
+  shiny::div(
+    class = "cgm-complexity-dashboard",
     shiny::div(
-      class = "complexity-controls-panel",
+      class = "cgm-complexity-overview",
+      shiny::h3("Complexity analytics"),
+      shiny::p(
+        class = "cgm-dashboard-intro",
+        "Complexity metrics describe regularity and long-range structure in glucose patterns after the current preprocessing choices are applied."
+      )
+    ),
+    shiny::tags$section(
+      class = "cgm-dashboard-section cgm-complexity-controls-section",
       shiny::div(
-        class = "complexity-control-group",
-        shiny::h4("Filters"),
-        shiny::div(
-          class = "complexity-control-grid",
-          shiny::uiOutput(ns("subject_filter")),
-          shiny::uiOutput(ns("group_filter"))
-        )
+        class = "cgm-dashboard-section-header",
+        shiny::h4("Analysis controls")
       ),
       shiny::div(
-        class = "complexity-control-group",
-        shiny::h4("Core parameters"),
+        class = "cgm-dashboard-section-body",
         shiny::div(
-          class = "complexity-control-grid",
-          shiny::numericInput(ns("min_points"), "Minimum usable points", value = 100, min = 20, step = 10),
-          shiny::numericInput(ns("entropy_bin_width"), "Entropy bin width", value = 10, min = 1, step = 1),
-          shiny::numericInput(ns("embedding_dimension"), "Embedding dimension", value = 2, min = 2, step = 1)
-        )
-      ),
-      shiny::div(
-        class = "complexity-control-group",
-        shiny::h4("Curve parameters"),
-        shiny::div(
-          class = "complexity-control-grid",
-          shiny::numericInput(ns("mse_scale_max"), "MSE max scale", value = 5, min = 1, step = 1),
-          shiny::numericInput(ns("higuchi_kmax"), "Higuchi kmax", value = 8, min = 2, step = 1)
+          class = "cgm-complexity-controls-panel",
+          shiny::div(
+            class = "cgm-complexity-control-group",
+            shiny::h4("Filters"),
+            shiny::div(
+              class = "cgm-complexity-control-grid",
+              shiny::uiOutput(ns("subject_filter")),
+              shiny::uiOutput(ns("group_filter"))
+            )
+          ),
+          shiny::div(
+            class = "cgm-complexity-control-group",
+            shiny::h4("Core parameters"),
+            shiny::div(
+              class = "cgm-complexity-control-grid",
+              shiny::numericInput(ns("min_points"), "Minimum usable points", value = 100, min = 20, step = 10),
+              shiny::numericInput(ns("entropy_bin_width"), "Entropy bin width", value = 10, min = 1, step = 1),
+              shiny::numericInput(ns("embedding_dimension"), "Embedding dimension", value = 2, min = 2, step = 1)
+            )
+          ),
+          shiny::div(
+            class = "cgm-complexity-control-group",
+            shiny::h4("Curve parameters"),
+            shiny::div(
+              class = "cgm-complexity-control-grid",
+              shiny::numericInput(ns("mse_scale_max"), "MSE max scale", value = 5, min = 1, step = 1),
+              shiny::numericInput(ns("higuchi_kmax"), "Higuchi kmax", value = 8, min = 2, step = 1)
+            )
+          )
         )
       )
     ),
-    shinycssloaders::withSpinner(shiny::uiOutput(ns("summary_cards")), type = 4),
-    shiny::uiOutput(ns("mse_status_note")),
-    shiny::h4("Visual summary"),
-    shiny::fluidRow(
-      shiny::column(3, shiny::selectInput(ns("visual_mode"), "Visual type", choices = complexity_visual_mode_choices(), selected = "metric_summary")),
-      shiny::column(3, shiny::uiOutput(ns("metric_filter"))),
-      shiny::column(3, shiny::uiOutput(ns("curve_filter")))
+    shiny::tags$section(
+      class = "cgm-dashboard-section cgm-complexity-summary-section",
+      shiny::div(
+        class = "cgm-dashboard-section-header",
+        shiny::h4("Complexity status")
+      ),
+      shiny::div(
+        class = "cgm-dashboard-section-body",
+        shinycssloaders::withSpinner(shiny::uiOutput(ns("summary_cards")), type = 4),
+        shiny::uiOutput(ns("mse_status_note"))
+      )
     ),
-    shiny::uiOutput(ns("complexity_plot_ui")),
-    shiny::div(
-      style = "display:flex; justify-content:space-between; align-items:center; gap:12px;",
-      shiny::h4("Complexity metrics"),
-      shiny::downloadButton(ns("download_complexity"), "Download CSV")
+    shiny::tags$section(
+      class = "cgm-dashboard-section cgm-complexity-visual-section",
+      shiny::div(
+        class = "cgm-dashboard-section-header",
+        shiny::h4("Visual summary"),
+        shiny::div(
+          class = "cgm-filter-bar cgm-complexity-visual-filter-bar",
+          shiny::selectInput(ns("visual_mode"), "Visual type", choices = complexity_visual_mode_choices(), selected = "metric_summary"),
+          shiny::uiOutput(ns("metric_filter")),
+          shiny::uiOutput(ns("curve_filter"))
+        )
+      ),
+      shiny::div(
+        class = "cgm-dashboard-section-body cgm-plot-panel",
+        shiny::uiOutput(ns("complexity_plot_ui"))
+      )
     ),
-    shiny::uiOutput(ns("metrics_table_ui"))
+    shiny::tags$section(
+      class = "cgm-dashboard-section cgm-complexity-table-section",
+      shiny::div(
+        class = "cgm-dashboard-section-header",
+        shiny::h4("Complexity metrics"),
+        shiny::downloadButton(ns("download_complexity"), "Download CSV")
+      ),
+      shiny::div(
+        class = "cgm-dashboard-section-body cgm-table-panel",
+        shiny::uiOutput(ns("metrics_table_ui"))
+      )
+    )
   )
 }
 
 complexity_loading_ui <- function(message = "Complexity metrics are calculating.") {
   shiny::div(
-    class = "complexity-loading",
-    style = "display:flex; align-items:center; gap:12px; min-height:96px;",
-    shiny::tags$style("@keyframes cgm-complexity-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }"),
-    shiny::div(style = "width:28px; height:28px; border:4px solid #d9edf7; border-top-color:#31708f; border-radius:50%; animation:cgm-complexity-spin 0.8s linear infinite;"),
+    class = "cgm-complexity-loading",
+    shiny::div(class = "cgm-complexity-spinner"),
     shiny::span(message)
   )
+}
+
+complexity_status_chip_ui <- function(label, status = "idle", text = "") {
+  if (!nzchar(text %||% "") && identical(status %||% "idle", "idle")) {
+    return(NULL)
+  }
+  shiny::div(
+    class = paste("cgm-status-chip", paste0("cgm-status-chip-", status %||% "idle")),
+    shiny::strong(label),
+    shiny::span(text %||% "")
+  )
+}
+
+complexity_status_chips_ui <- function(
+  quick_status = "idle",
+  hurst_status = "idle",
+  curve_status = "idle",
+  mse_status = "idle"
+) {
+  chips <- Filter(Negate(is.null), list(
+    complexity_status_chip_ui("Summary", quick_status, complexity_status_text(quick_status)),
+    complexity_status_chip_ui("Hurst", hurst_status, complexity_scalar_status_text(hurst_status)),
+    complexity_status_chip_ui("DFA/Higuchi", curve_status, complexity_curve_status_text(curve_status)),
+    complexity_status_chip_ui("MSE", mse_status, complexity_mse_status_text(mse_status))
+  ))
+  if (!length(chips)) {
+    return(NULL)
+  }
+  shiny::div(class = "cgm-status-chip-row cgm-complexity-status-chips", shiny::tagList(chips))
+}
+
+complexity_subject_id_display_override <- function(subject = NULL) {
+  if (specific_filter_selected(subject)) TRUE else NULL
 }
 
 complexity_module_server <- function(id, standardized, active_tab = NULL) {
@@ -461,7 +495,7 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
     })
 
     force_subject_id_display <- shiny::reactive({
-      specific_filter_selected(input$subject)
+      complexity_subject_id_display_override(input$subject)
     })
 
     output$summary_cards <- shiny::renderUI({
@@ -481,17 +515,12 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
 
     output$mse_status_note <- shiny::renderUI({
       req_active_tab(active_tab, "complexity")
-      notes <- c(
-        complexity_status_text(quick_status()),
-        complexity_scalar_status_text(hurst_status()),
-        complexity_curve_status_text(curve_status()),
-        complexity_mse_status_text(mse_status())
+      complexity_status_chips_ui(
+        quick_status(),
+        hurst_status(),
+        curve_status(),
+        mse_status()
       )
-      note <- paste(notes[nzchar(notes)], collapse = " ")
-      if (!nzchar(note)) {
-        return(NULL)
-      }
-      shiny::div(class = "alert alert-info", note)
     })
 
     output$metric_filter <- shiny::renderUI({

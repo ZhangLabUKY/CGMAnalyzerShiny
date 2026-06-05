@@ -39,7 +39,10 @@ test_that("performance timing is disabled by default and can write logs when ena
   expect_equal(log$rows, 3L)
   expect_equal(log$status, "ok")
 
-  expect_error(cgm_timed("error_test", stop("boom", call. = FALSE)), "boom")
+  expect_message(
+    expect_error(cgm_timed("error_test", stop("boom", call. = FALSE)), "boom"),
+    "\\[CGMA perf\\] error_test"
+  )
   log <- utils::read.csv(file, stringsAsFactors = FALSE)
   error_row <- log[log$label == "error_test", , drop = FALSE]
   expect_equal(error_row$status, "error")

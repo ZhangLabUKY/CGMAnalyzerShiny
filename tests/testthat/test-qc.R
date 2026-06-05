@@ -217,6 +217,191 @@ test_that("quality imputation status is summarized only when imputation is selec
   expect_true("Missing warning threshold (%)" %in% names(status))
 })
 
+test_that("quality imputation warning text is split into list items", {
+  items <- quality_imputation_warning_list(paste(
+    "Warnings:",
+    "Long contiguous missing glucose blocks were detected after timestamp-gap regularization:",
+    "Subject 01VV_CGM has a contiguous missing block of at least one full day.",
+    "Subject K25_CGM has a contiguous missing block of at least one half day. |",
+    "Number of logged events: 2"
+  ))
+
+  expect_equal(length(items), 2)
+  expect_match(items[[1L]], "Subject 01VV_CGM has a contiguous missing block", fixed = TRUE)
+  expect_match(items[[2L]], "Subject K25_CGM has a contiguous missing block", fixed = TRUE)
+  expect_false(any(grepl("logged events", items, ignore.case = TRUE)))
+})
+
+test_that("quality imputation warnings are grouped and expandable", {
+  warnings <- quality_imputation_warning_items(paste(
+    "Subject 01VV_CGM: High missingness after timestamp-gap regularization: 54.8% of glucose values are missing.",
+    "Subject 01VV_CGM has a contiguous missing block of at least one full day. |",
+    "Subject K25_CGM: High missingness after timestamp-gap regularization: 26.3% of glucose values are missing. |",
+    "Number of logged events: 2"
+  ))
+  collapsed <- paste(as.character(quality_imputation_warning_groups_ui(
+    warnings,
+    show_all = FALSE,
+    toggle_id = "toggle_warnings",
+    max_groups = 1L,
+    max_items_per_group = 1L
+  )), collapse = "\n")
+  expanded <- paste(as.character(quality_imputation_warning_groups_ui(
+    warnings,
+    show_all = TRUE,
+    toggle_id = "toggle_warnings"
+  )), collapse = "\n")
+
+  expect_equal(unique(warnings$Group), c("Subject 01VV_CGM", "Subject K25_CGM"))
+  expect_true(grepl("Show all warnings", collapsed, fixed = TRUE))
+  expect_true(grepl("Show fewer warnings", expanded, fixed = TRUE))
+  expect_false(grepl("Number of logged events", expanded, fixed = TRUE))
+  expect_true(grepl("Subject 01VV_CGM", expanded, fixed = TRUE))
+  expect_true(grepl("High missingness", expanded, fixed = TRUE))
+  expect_true(grepl("Contiguous full-day block", expanded, fixed = TRUE))
+})
+
+test_that("quality imputation warnings merge repeated subject groups", {
+  warnings <- quality_imputation_warning_items(paste(
+    "Subject 01VV_CGM: High missingness after timestamp-gap regularization: 54.8% of glucose values are missing. |",
+    "Subject 01VV_CGM has a contiguous missing block of at least one full day (173.6 hours), from 2021-01-21 12:53:33 to 2021-01-28 18:23:33. |",
+    "Subject 01VV_CGM has a contiguous missing block of at least one full day (27.0 hours), from 2021-03-03 17:01:33 to 2021-03-04 19:56:33. |",
+    "Timestamp-gap review found dataset-level issues. |",
+    "Number of logged events: 4"
+  ))
+  html <- paste(as.character(quality_imputation_warning_groups_ui(
+    warnings,
+    show_all = TRUE,
+    toggle_id = "toggle_warnings"
+  )), collapse = "\n")
+  subject_occurrences <- gregexpr("Subject 01VV_CGM", html, fixed = TRUE)[[1L]]
+
+  expect_equal(sum(warnings$Group == "Subject 01VV_CGM"), 3)
+  expect_equal(length(unique(warnings$GroupKey[warnings$Group == "Subject 01VV_CGM"])), 1)
+  expect_equal(length(subject_occurrences[subject_occurrences > 0L]), 1)
+  expect_true(grepl("Dataset warnings", html, fixed = TRUE))
+  expect_false(grepl("Number of logged events", html, fixed = TRUE))
+})
+
+test_that("quality imputation status renders grouped warnings and method details", {
+  status <- data.frame(
+    Method = "MICE + ARIMA / XGBoost",
+    Model = "Auto",
+    Status = "Applied",
+    `Method details` = "ARIMA: 1 Subject ID(s); XGBoost: 1 Subject ID(s)",
+    `Filled glucose rows` = 2,
+    `Original missing glucose` = 2,
+    `Original missing glucose (%)` = 10,
+    `Analysis missing glucose` = 0,
+    `Analysis missing glucose (%)` = 0,
+    `Estimated missing readings from gaps` = 0,
+    Warnings = paste(
+      "Long contiguous missing glucose blocks were detected after timestamp-gap regularization:",
+      "Subject 01VV_CGM has a contiguous missing block.",
+      "Subject K25_CGM has a contiguous missing block. |",
+      "Number of logged events: 2"
+    ),
+    Message = "Imputation filled 2 missing glucose row(s).",
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  html <- paste(as.character(quality_imputation_status_ui(status)), collapse = "\n")
+
+  expect_true(grepl("Warnings", html, fixed = TRUE))
+  expect_false(grepl("Warnings and logged events", html, fixed = TRUE))
+  expect_false(grepl("Number of logged events", html, fixed = TRUE))
+  expect_true(grepl("Subject-level methods", html, fixed = TRUE))
+  expect_true(grepl("Subject 01VV_CGM", html, fixed = TRUE))
+  expect_true(grepl("Subject K25_CGM", html, fixed = TRUE))
+})
+
+test_that("quality imputation status hides method details without subject metadata", {
+  status <- data.frame(
+    Method = "MICE + ARIMA / XGBoost",
+    Model = "Auto",
+    Status = "Applied",
+    `Method details` = "",
+    `Filled glucose rows` = 2,
+    `Original missing glucose` = 2,
+    `Original missing glucose (%)` = 10,
+    `Analysis missing glucose` = 0,
+    `Analysis missing glucose (%)` = 0,
+    `Estimated missing readings from gaps` = 0,
+    Warnings = "",
+    Message = "Imputation filled 2 missing glucose row(s).",
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  html <- paste(as.character(quality_imputation_status_ui(status)), collapse = "\n")
+
+  expect_false(grepl("Subject-level methods", html, fixed = TRUE))
+})
+
+test_that("quality QC review summary counts review flags", {
+  ok <- data.frame(
+    id = "A",
+    timestamp = seq(
+      parse_cgm_timestamp("2026-05-05 00:00:00"),
+      parse_cgm_timestamp("2026-05-05 23:00:00"),
+      by = "hour"
+    ),
+    glucose = 100,
+    stringsAsFactors = FALSE
+  )
+  review <- data.frame(
+    id = c("B", "B"),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 08:00:00",
+      "2026-05-05 08:00:00"
+    )),
+    glucose = c(120, 500),
+    stringsAsFactors = FALSE
+  )
+  data <- rbind(ok, review)
+  data$units <- "mg/dL"
+  data$device <- NA_character_
+  data$group <- NA_character_
+  data$source_file <- NA_character_
+  data$imputed_flag <- FALSE
+  data$id_source <- subject_id_source_mapped()
+  qc <- compute_qc_summary(data, valid_day_hours = 1)
+  summary <- quality_qc_review_summary(qc, data)
+
+  expect_equal(summary$cards$Value[summary$cards$Label == "Subjects OK"], "1")
+  expect_equal(summary$cards$Value[summary$cards$Label == "Needs review"], "1")
+  expect_equal(summary$cards$Value[summary$cards$Label == "Duplicate timestamps"], "1")
+  expect_equal(summary$cards$Value[summary$cards$Label == "Implausible values"], "1")
+  expect_equal(nrow(summary$review_rows), 1)
+  expect_equal(summary$review_rows[["Subject ID"]], "B")
+})
+
+test_that("quality module UI renders simplified dashboard sections without tabsets", {
+  html <- paste(as.character(qc_module_ui("qc")), collapse = "\n")
+
+  expect_true(grepl("cgm-quality-dashboard", html, fixed = TRUE))
+  expect_true(grepl("cgm-quality-overview", html, fixed = TRUE))
+  expect_true(grepl("cgm-quality-section", html, fixed = TRUE))
+  expect_true(grepl("cgm-quality-section-header", html, fixed = TRUE))
+  expect_true(grepl("cgm-quality-qc-section", html, fixed = TRUE))
+  expect_true(grepl("cgm-quality-calendar-section", html, fixed = TRUE))
+
+  expect_true(grepl("qc-qc_summary_cards", html, fixed = TRUE))
+  expect_true(grepl("qc-duplicate_timestamp_note", html, fixed = TRUE))
+  expect_true(grepl("qc-qc_review_ui", html, fixed = TRUE))
+  expect_true(grepl("qc-imputation_status", html, fixed = TRUE))
+  expect_true(grepl("qc-missingness_subject_filter", html, fixed = TRUE))
+  expect_true(grepl("qc-missingness_heatmap_ui", html, fixed = TRUE))
+
+  expect_false(grepl("Study window coverage", html, fixed = TRUE))
+  expect_false(grepl("Missingness Summary", html, fixed = TRUE))
+  expect_false(grepl("qc-study_window_table", html, fixed = TRUE))
+  expect_false(grepl("qc-missingness_comparison_table", html, fixed = TRUE))
+  expect_false(grepl("tabset", html, ignore.case = TRUE))
+  expect_false(grepl("nav-tabs", html, fixed = TRUE))
+})
+
 test_that("quality module returns QC summaries for the active Quality tab", {
   data <- data.frame(
     id = c("A", "A", "A", "B"),

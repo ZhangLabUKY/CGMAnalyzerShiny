@@ -1,29 +1,34 @@
 app_ui <- function() {
   shiny::navbarPage(
-    title = "CGMAnalyzerShiny",
+    title = app_brand_ui(),
     id = "active_tab",
     theme = bslib::bs_theme(version = 5, bootswatch = "flatly"),
-    # header = shiny::div(
-    #   style = "position: absolute; top: 8px; right: 15px; z-index: 1050;",
-    #   shinyscreenshot::screenshotButton(
-    #     label = "Capture",
-    #     filename = "cgm-analyzer"
-    #     # The 'id' argument has been completely removed
-    #   )
-    # ),
+    header = app_theme_css(),
     shiny::tabPanel(
       "Data",
       value = "data",
-      shiny::fluidRow(
-        shiny::column(5, upload_module_ui("upload")),
-        shiny::column(
-          7,
-          shiny::uiOutput("data_upload_hint"),
-          shiny::uiOutput("upload-import_setup"),
-          shiny::uiOutput("data_mapping_ui")
+      shiny::div(
+        class = "cgm-data-tab",
+        shiny::uiOutput("data_status_strip"),
+        data_workflow_tabs_ui(
+          setup_ui = shiny::tagList(
+            shiny::fluidRow(
+              shiny::column(5, upload_module_ui("upload")),
+              shiny::column(
+                7,
+                shiny::uiOutput("data_upload_hint"),
+                shiny::uiOutput("upload-import_setup"),
+                shiny::uiOutput("data_mapping_ui")
+              )
+            ),
+            shiny::hr(),
+            shiny::uiOutput("data_preprocessing_settings_ui")
+          ),
+          validate_ui = shiny::uiOutput("data_setup_status"),
+          impute_ui = shiny::uiOutput("data_imputation_ui"),
+          preview_ui = shiny::uiOutput("data_preview_ui")
         )
-      ),
-      shiny::uiOutput("data_workflow_ui")
+      )
     ),
     shiny::tabPanel(
       "Quality",

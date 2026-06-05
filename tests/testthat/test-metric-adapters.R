@@ -1,8 +1,5 @@
 test_that("to_iglu_data converts standardized data shape", {
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+  demo <- example_missing_5pct_standardized(fill_missing = TRUE)
 
   iglu_data <- to_iglu_data(demo)
 
@@ -11,16 +8,13 @@ test_that("to_iglu_data converts standardized data shape", {
   expect_s3_class(iglu_data$time, "POSIXct")
 })
 
-test_that("regularize_cgm_series keeps regular complete example at five-minute interval", {
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+test_that("regularize_cgm_series keeps regular example at five-minute interval", {
+  demo <- example_missing_5pct_standardized(fill_missing = TRUE)
 
   one_id <- demo[demo$id == "11", , drop = FALSE]
   regular <- regularize_cgm_series(one_id)
 
-  expect_equal(nrow(regular), 100)
+  expect_equal(nrow(regular), 288)
   expect_equal(attr(regular, "interval_minutes"), 5)
   expect_false(any(is.na(regular$glucose)))
 })
@@ -28,14 +22,7 @@ test_that("regularize_cgm_series keeps regular complete example at five-minute i
 test_that("CGManalyzer adapter computes vector-backed metrics", {
   skip_if_not_installed("CGManalyzer")
 
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(
-      id = "USUBJID",
-      timestamp = "Time",
-      glucose = "LBORRES"
-    )
-  )
+  demo <- example_missing_5pct_standardized(fill_missing = TRUE)
 
   metrics <- compute_cgmanalyzer_metrics(demo)
 
@@ -50,14 +37,7 @@ test_that("CGManalyzer adapter computes vector-backed metrics", {
 test_that("iglu adapter computes selected fallback metrics", {
   skip_if_not_installed("iglu")
 
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(
-      id = "USUBJID",
-      timestamp = "Time",
-      glucose = "LBORRES"
-    )
-  )
+  demo <- example_missing_5pct_standardized(fill_missing = TRUE)
 
   metrics <- compute_iglu_metrics(demo)
 
@@ -71,14 +51,7 @@ test_that("iglu adapter computes selected fallback metrics", {
 test_that("batched iglu adapter matches participant-wise iglu outputs", {
   skip_if_not_installed("iglu")
 
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(
-      id = "USUBJID",
-      timestamp = "Time",
-      glucose = "LBORRES"
-    )
-  )
+  demo <- example_missing_5pct_standardized(fill_missing = TRUE)
 
   batched <- compute_iglu_metrics(demo, by = "id")
   iglu_data <- to_iglu_data(demo)

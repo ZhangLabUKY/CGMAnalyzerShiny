@@ -150,6 +150,11 @@ test_that("subject id mapping labels and status use filename fallback", {
 test_that("column mapping UI exposes subject metadata action and hides removed optional controls", {
   html <- paste(as.character(column_mapping_module_ui("column_mapping")), collapse = "\n")
 
+  expect_true(grepl("cgm-column-mapping-grid", html, fixed = TRUE))
+  expect_true(grepl("cgm-column-mapping-field-subject", html, fixed = TRUE))
+  expect_true(grepl("cgm-column-mapping-field-timestamp", html, fixed = TRUE))
+  expect_true(grepl("cgm-column-mapping-field-glucose", html, fixed = TRUE))
+  expect_true(grepl("cgm-column-mapping-units", html, fixed = TRUE))
   expect_true(grepl("column_mapping-edit_metadata", html, fixed = TRUE))
   expect_true(grepl("Subject Metadata", html, fixed = TRUE))
   expect_false(grepl("column_mapping-group_mapping_ui", html, fixed = TRUE))
@@ -193,18 +198,17 @@ test_that("active tab helper gates tabs predictably", {
   expect_false(is_active_tab(active, "quality"))
 })
 
+test_that("upload module offers only retained bundled examples", {
+  html <- as.character(upload_module_ui("upload"))
+
+  expect_false(grepl("load_example_complete", html, fixed = TRUE))
+  expect_false(grepl("Load complete example", html, fixed = TRUE))
+  expect_true(grepl("load_example_missing_5pct", html, fixed = TRUE))
+  expect_true(grepl("load_example_missing_10pct", html, fixed = TRUE))
+})
+
 test_that("upload module loads bundled examples through server actions", {
   shiny::testServer(upload_module_server, {
-    session$setInputs(load_example_complete = 0)
-    session$flushReact()
-    session$setInputs(load_example_complete = 1)
-    session$flushReact()
-    complete <- uploaded()
-    expect_true(isTRUE(complete$demo))
-    expect_equal(complete$files, "cgm_example_complete.csv")
-    expect_equal(complete$upload_mode, "single_file")
-    expect_true(nrow(complete$data) > 0L)
-
     session$setInputs(load_example_missing_5pct = 0)
     session$flushReact()
     session$setInputs(load_example_missing_5pct = 1)

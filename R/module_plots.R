@@ -8,40 +8,80 @@ plot_filter_layout_order <- function(plot_type = "trace") {
 
 plot_filter_layout_ui <- function(ns, plot_type = "trace") {
   filters <- plot_filter_layout_order(plot_type)
-  shiny::tagList(
-    shiny::fluidRow(
-      shiny::column(
-        3,
-        shiny::selectInput(
-          ns("plot_type"),
-          "Plot type",
-          choices = c("Trace" = "trace", "Daily overlay" = "daily_overlay", "AGP summary" = "agp"),
-          selected = plot_type
-        )
-      ),
-      lapply(filters, function(filter_id) {
-        shiny::column(3, shiny::uiOutput(ns(filter_id)))
-      })
-    )
+  shiny::div(
+    class = "cgm-filter-bar cgm-plots-filter-bar",
+    shiny::selectInput(
+      ns("plot_type"),
+      "Plot type",
+      choices = c("Trace" = "trace", "Daily overlay" = "daily_overlay", "AGP summary" = "agp"),
+      selected = plot_type
+    ),
+    lapply(filters, function(filter_id) {
+      shiny::uiOutput(ns(filter_id))
+    })
+  )
+}
+
+plot_guidance_text <- function(plot_type = "trace") {
+  switch(
+    plot_type %||% "trace",
+    trace = "Timeline of glucose readings by Subject ID, with imputed readings highlighted when present.",
+    daily_overlay = "Within-day glucose pattern by date; the date legend is hidden automatically when many days are shown.",
+    agp = "Median glucose and percentile bands summarized across time of day.",
+    "Review the selected CGM visualization."
+  )
+}
+
+plot_status_chip_ui <- function(message = NULL) {
+  message <- trimws(message %||% "")
+  if (!nzchar(message)) {
+    return(NULL)
+  }
+  shiny::div(class = "cgm-plot-status-chip", message)
+}
+
+plot_note_row_ui <- function(...) {
+  notes <- Filter(Negate(is.null), list(...))
+  if (!length(notes)) {
+    return(NULL)
+  }
+  shiny::div(
+    class = "cgm-plot-note-row",
+    shiny::tagList(notes)
   )
 }
 
 plots_module_ui <- function(id) {
   ns <- shiny::NS(id)
-  shiny::tagList(
-    shiny::fluidRow(
-      shiny::column(9, shiny::h3("Plots")),
-      shiny::column(
-        3,
+  shiny::div(
+    class = "cgm-plots-dashboard",
+    shiny::div(
+      class = "cgm-plots-overview",
+      shiny::h3("Plots")
+    ),
+    shiny::div(
+      class = "cgm-dashboard-section cgm-plots-visual-section",
+      shiny::div(
+        class = "cgm-dashboard-section-header",
+        shiny::h4("Visual summary"),
         shiny::div(
-          style = "text-align: right; padding-top: 12px;",
+          class = "cgm-plots-header-actions",
+          shiny::uiOutput(ns("filter_layout")),
           shiny::downloadButton(ns("download_plot"), "Download PNG")
         )
+      ),
+      shiny::div(
+        class = "cgm-dashboard-section-body",
+        shiny::div(
+          class = "cgm-plots-summary",
+          shinycssloaders::withSpinner(shiny::uiOutput(ns("plot_summary")), type = 4)
+        ),
+        shiny::div(
+          class = "cgm-plot-panel cgm-plots-active-panel",
+          shinycssloaders::withSpinner(plotly::plotlyOutput(ns("active_plot"), height = "460px"), type = 4)
+        )
       )
-    ),
-    shiny::uiOutput(ns("filter_layout")),
-    shinycssloaders::withSpinner(shiny::uiOutput(ns("plot_summary")), type = 4),
-    shinycssloaders::withSpinner(plotly::plotlyOutput(ns("active_plot"), height = "460px"), type = 4)
+    )
   )
 }
 
@@ -201,12 +241,11 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
           ),
           compact = TRUE
         ),
-        if (nzchar(note)) {
-          shiny::div(class = "alert alert-info", note)
-        },
-        if (nzchar(display_note)) {
-          shiny::div(class = "alert alert-info", display_note)
-        }
+        plot_note_row_ui(
+          plot_status_chip_ui(plot_guidance_text(plot_type)),
+          plot_status_chip_ui(note),
+          plot_status_chip_ui(display_note)
+        )
       )
     })
 
@@ -268,7 +307,7 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
     )
 
     output$active_plot <- plotly::renderPlotly({
-      plotly_plot <- cgm_timed("plots_ggplotly_render", plotly::ggplotly(active_plot()))
+      plotly_plot <- cgm_timed("plots_ggplotly_render", plotly::ggplotly(active_plot(), tooltip = "text"))
       if (identical(input$plot_type, "agp")) {
         plotly_plot <- cgm_timed("plots_agp_layout", layout_agp_plotly(plotly_plot))
       }

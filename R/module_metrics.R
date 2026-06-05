@@ -1,18 +1,31 @@
 metrics_module_ui <- function(id) {
   ns <- shiny::NS(id)
-  shiny::tagList(
-    shiny::h3("Core Metrics"),
-    shiny::h4("Metric overview"),
-    shinycssloaders::withSpinner(shiny::uiOutput(ns("summary_cards")), type = 4),
-    shiny::uiOutput(ns("optional_metric_note")),
-    shiny::h4("Detailed metrics"),
-    shiny::fluidRow(
-      shiny::column(3, shiny::uiOutput(ns("participant_filter"))),
-      shiny::column(3, shiny::uiOutput(ns("category_filter"))),
-      shiny::column(3, shiny::uiOutput(ns("group_filter")))
+  shiny::div(
+    class = "cgm-metrics-dashboard",
+    shiny::div(
+      class = "cgm-metrics-overview",
+      shiny::h3("CGM metrics"),
+      shinycssloaders::withSpinner(shiny::uiOutput(ns("summary_cards")), type = 4),
+      shiny::uiOutput(ns("optional_metric_note"))
     ),
-    shiny::uiOutput(ns("metrics_empty_state")),
-    shinycssloaders::withSpinner(DT::DTOutput(ns("metrics_table")), type = 4)
+    shiny::tags$section(
+      class = "cgm-dashboard-section cgm-metrics-detail-section",
+      shiny::div(
+        class = "cgm-dashboard-section-header",
+        shiny::h4("Detailed metrics"),
+        shiny::div(
+          class = "cgm-filter-bar cgm-metrics-filter-bar",
+          shiny::uiOutput(ns("participant_filter")),
+          shiny::uiOutput(ns("group_filter")),
+          shiny::uiOutput(ns("category_filter"))
+        )
+      ),
+      shiny::div(
+        class = "cgm-dashboard-section-body",
+        shiny::uiOutput(ns("metrics_empty_state")),
+        shinycssloaders::withSpinner(DT::DTOutput(ns("metrics_table")), type = 4)
+      )
+    )
   )
 }
 
@@ -180,7 +193,10 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
       if (!identical(state$status, "base_ready") || !nzchar(note)) {
         return(NULL)
       }
-      shiny::div(class = "alert alert-info", note)
+      shiny::div(
+        class = "cgm-compact-info-note cgm-metrics-optional-note",
+        shiny::span(note)
+      )
     })
 
     output$group_filter <- shiny::renderUI({

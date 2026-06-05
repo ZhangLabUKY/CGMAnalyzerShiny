@@ -11,6 +11,67 @@ default_cgm_thresholds <- function() {
   if (is.null(x)) y else x
 }
 
+app_version <- function() {
+  if (file.exists("DESCRIPTION")) {
+    description <- tryCatch(
+      read.dcf("DESCRIPTION", fields = "Version"),
+      error = function(error) NA_character_
+    )
+    version <- as.character(description[[1L]])
+    if (!is.na(version) && nzchar(version)) {
+      return(version)
+    }
+  }
+  installed_version <- tryCatch(
+    utils::packageDescription("CGMAnalyzerShiny", fields = "Version"),
+    error = function(error) NA_character_
+  )
+  if (!is.na(installed_version) && nzchar(installed_version)) {
+    return(as.character(installed_version))
+  }
+  "unknown"
+}
+
+app_version_label <- function() {
+  paste0("v", app_version())
+}
+
+app_brand_ui <- function() {
+  shiny::span(
+    class = "cgm-brand-stack",
+    shiny::span(class = "cgm-brand-name", "CGMAnalyzerShiny"),
+    shiny::span(class = "cgm-version-label", app_version_label())
+  )
+}
+
+app_theme_css_path <- function() {
+  local_path <- file.path("www", "cgm-theme.css")
+  if (file.exists(local_path)) {
+    return(local_path)
+  }
+  source_package_path <- file.path("inst", "www", "cgm-theme.css")
+  if (file.exists(source_package_path)) {
+    return(source_package_path)
+  }
+  package_path <- system.file(
+    "www",
+    "cgm-theme.css",
+    package = "CGMAnalyzerShiny"
+  )
+  if (nzchar(package_path)) {
+    return(package_path)
+  }
+  NA_character_
+}
+
+app_theme_css <- function() {
+  path <- app_theme_css_path()
+  if (is.na(path) || !file.exists(path)) {
+    return(NULL)
+  }
+  shiny::includeCSS(path)
+}
+
 #' Create a reproducibility settings object
 #'
 #' @param column_mapping Named list of source column mappings.

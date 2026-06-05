@@ -39,11 +39,8 @@ test_that("run_metric_stat_test runs Wilcoxon rank-sum on participant-level metr
   expect_true(is.finite(result$`P-value`))
 })
 
-test_that("run_metric_stat_test reports unavailable grouping for current complete example", {
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+test_that("run_metric_stat_test reports unavailable grouping for current bundled example", {
+  demo <- example_missing_5pct_standardized()
   metrics <- compute_core_metrics(demo)
   result <- run_metric_stat_test(metrics, metric = "mean_glucose", grouping = "group", test_type = "welch_t")
 

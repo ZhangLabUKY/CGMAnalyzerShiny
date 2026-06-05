@@ -1,13 +1,5 @@
 test_that("bundled example datasets load with expected missingness", {
   examples <- list(
-    complete = list(
-      data = load_example_complete_cgm_data(),
-      file = "cgm_example_complete",
-      rows = 500L,
-      missing = 0L,
-      readings_per_subject = rep(100L, 5),
-      has_sex = FALSE
-    ),
     missing_5pct = list(
       data = load_example_missing_5pct_cgm_data(),
       file = "CGMExmplDat5Pct",
@@ -54,7 +46,6 @@ test_that("bundled example datasets load with expected missingness", {
 
 test_that("bundled examples standardize with colon timestamps and expected missing glucose", {
   examples <- list(
-    list(data = load_example_complete_cgm_data(), rows = 500L, missing = 0L, readings_per_subject = rep(100L, 5)),
     list(data = load_example_missing_5pct_cgm_data(), rows = 1440L, missing = 72L, readings_per_subject = rep(288L, 5)),
     list(data = load_example_missing_10pct_cgm_data(), rows = 1440L, missing = 144L, readings_per_subject = rep(288L, 5))
   )

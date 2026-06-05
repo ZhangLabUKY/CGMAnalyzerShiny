@@ -930,12 +930,72 @@ format_imputation_model_choice <- function(model) {
   unname(labels[[model]] %||% labels[["auto"]])
 }
 
+normalize_imputation_method_label <- function(method) {
+  method <- trimws(as.character(method))
+  method <- gsub("\\+", " + ", method)
+  method <- gsub("\\s+", " ", method)
+  method
+}
+
+compact_imputation_method_labels <- function(method) {
+  method <- normalize_imputation_method_label(method)
+  if (length(method) > 1L && all(grepl("^MICE \\+ ", method))) {
+    return(paste0("MICE + ", paste(sub("^MICE \\+ ", "", method), collapse = " / ")))
+  }
+  paste(method, collapse = " / ")
+}
+
 format_returned_imputation_method <- function(method, fallback = "MICE imputation") {
-  method <- method %||% NA_character_
-  if (is.na(method) || !nzchar(method)) {
+  method <- unique(trimws(as.character(method %||% character())))
+  method <- method[nzchar(method) & !is.na(method)]
+  if (!length(method)) {
     return(fallback)
   }
-  gsub("\\+", " + ", method)
+  method <- normalize_imputation_method_label(method)
+  known_order <- c(
+    "MICE + ARIMA",
+    "MICE + XGBoost",
+    "MICE + RF",
+    "MICE + kNN",
+    "MICE + LightGBM"
+  )
+  method <- c(intersect(known_order, method), setdiff(method, known_order))
+  compact_imputation_method_labels(method)
+}
+
+imputation_method_details <- function(method_by_subject) {
+  if (
+    !is.data.frame(method_by_subject) ||
+      !nrow(method_by_subject) ||
+      !"Method" %in% names(method_by_subject)
+  ) {
+    return("")
+  }
+  method <- normalize_imputation_method_label(method_by_subject$Method)
+  method <- method[nzchar(method) & !is.na(method)]
+  if (!length(method)) {
+    return("")
+  }
+  counts <- sort(table(method), decreasing = TRUE)
+  labels <- sub("^MICE \\+ ", "", names(counts))
+  paste(
+    paste0(labels, ": ", as.integer(counts), " Subject ID(s)"),
+    collapse = "; "
+  )
+}
+
+imputation_numeric_status_value <- function(value, summary = c("first", "max")) {
+  summary <- match.arg(summary)
+  value <- suppressWarnings(as.numeric(value))
+  value <- value[is.finite(value)]
+  if (!length(value)) {
+    return(NA_real_)
+  }
+  if (identical(summary, "max")) {
+    max(value)
+  } else {
+    value[[1L]]
+  }
 }
 
 #' Summarize imputation status for user-facing QC
@@ -954,6 +1014,7 @@ summarize_imputation_status <- function(original_data, analysis_data, settings, 
   imputation_error <- attr(analysis_data, "imputation_error", exact = TRUE)
   imputation_pending <- attr(analysis_data, "imputation_pending", exact = TRUE)
   returned_method <- attr(analysis_data, "imputation_method", exact = TRUE)
+  returned_method_by_subject <- attr(analysis_data, "imputation_method_by_subject", exact = TRUE)
   returned_missing_rate <- attr(analysis_data, "imputation_missing_rate", exact = TRUE)
   returned_model <- attr(analysis_data, "imputation_model", exact = TRUE) %||% settings$imputation_model %||% "auto"
   returned_warning_threshold <- attr(analysis_data, "imputation_warning_threshold", exact = TRUE) %||%
@@ -964,6 +1025,8 @@ summarize_imputation_status <- function(original_data, analysis_data, settings, 
   if (!is.numeric(returned_warning_threshold) || !is.finite(returned_warning_threshold[[1L]])) {
     returned_warning_threshold <- settings$imputation_missing_warning_threshold %||% 0.20
   }
+  returned_missing_rate_value <- imputation_numeric_status_value(returned_missing_rate, "max")
+  returned_warning_threshold_value <- imputation_numeric_status_value(returned_warning_threshold, "first")
   imputation_warnings <- unique(as.character(attr(analysis_data, "imputation_warnings", exact = TRUE) %||% character()))
   imputation_warnings <- imputation_warnings[nzchar(imputation_warnings)]
   original_summary <- tryCatch(
@@ -1033,8 +1096,9 @@ summarize_imputation_status <- function(original_data, analysis_data, settings, 
     Model = if (identical(method, "mice_only")) format_imputation_model_choice(returned_model) else "",
     Status = status,
     Seed = seed,
-    `Missing warning threshold (%)` = if (is.numeric(returned_warning_threshold) && is.finite(returned_warning_threshold)) round(100 * returned_warning_threshold, 2) else NA_real_,
-    `Missing rate used by imputation (%)` = if (is.numeric(returned_missing_rate) && is.finite(returned_missing_rate)) round(100 * returned_missing_rate, 2) else NA_real_,
+    `Method details` = imputation_method_details(returned_method_by_subject),
+    `Missing warning threshold (%)` = if (is.finite(returned_warning_threshold_value)) round(100 * returned_warning_threshold_value, 2) else NA_real_,
+    `Missing rate used by imputation (%)` = if (is.finite(returned_missing_rate_value)) round(100 * returned_missing_rate_value, 2) else NA_real_,
     `Original missing glucose` = original_missing,
     `Original missing glucose (%)` = original_missing_percent,
     `Analysis missing glucose` = analysis_missing,

@@ -1,8 +1,5 @@
 complexity_example_data <- function() {
-  standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+  example_missing_5pct_standardized(fill_missing = TRUE)
 }
 
 complexity_grouped_example_data <- function() {
@@ -13,7 +10,7 @@ complexity_grouped_example_data <- function() {
   data
 }
 
-test_that("compute_complexity_metrics returns finite core metrics for complete example", {
+test_that("compute_complexity_metrics returns finite core metrics for bundled example", {
   data <- complexity_example_data()
   results <- compute_complexity_metrics(data, min_points = 80)
 
@@ -370,6 +367,36 @@ test_that("complexity plot helpers prepare finite metric values and choices", {
   expect_true(any(grepl("Subject ID:", plot_data$Tooltip, fixed = TRUE)))
 })
 
+test_that("complexity plot data shows Subject IDs by default for multi-subject data", {
+  data <- complexity_example_data()
+  ids <- subject_id_values(data)
+  results <- compute_complexity_metrics(data, min_points = 80)
+  plot_data <- prepare_complexity_plot_data(results, data)
+  curves <- data.frame(
+    id = rep(ids, each = 2),
+    curve_metric = "dfa",
+    scale_variable = "Window size",
+    scale_value = rep(c(8, 16), length(ids)),
+    metric_value = seq_along(rep(ids, each = 2)),
+    value_label = "Fluctuation",
+    derived_scalar_label = "DFA alpha",
+    derived_scalar_value = 0.8,
+    note = "",
+    stringsAsFactors = FALSE
+  )
+  curve_data <- prepare_complexity_curve_plot_data(curves, data)
+  summary_plot <- create_complexity_summary_plot(plot_data)
+  curve_plot <- create_complexity_scale_curve_plot(curve_data)
+
+  expect_gt(length(ids), 1)
+  expect_setequal(unique(as.character(plot_data$`Subject ID`)), ids)
+  expect_false(any(grepl("Analysis data", plot_data$Tooltip, fixed = TRUE)))
+  expect_setequal(unique(as.character(curve_data$`Subject ID`)), ids)
+  expect_false(any(grepl("Analysis data", curve_data$Tooltip, fixed = TRUE)))
+  expect_equal(summary_plot$labels$colour, "Subject ID")
+  expect_equal(curve_plot$labels$colour, "Subject ID")
+})
+
 test_that("complexity plot data filters selected metrics", {
   data <- complexity_example_data()
   results <- compute_complexity_metrics(data, min_points = 80)
@@ -565,8 +592,11 @@ test_that("complexity display hides Subject ID for one filename-derived subject"
     stringsAsFactors = FALSE
   )
   results <- compute_complexity_metrics(data, min_points = 100)
+  plot_data <- prepare_complexity_plot_data(results, data)
 
   expect_false("Subject ID" %in% names(prepare_complexity_metrics_display(results, data)))
+  expect_setequal(unique(as.character(plot_data$`Subject ID`)), "Analysis data")
+  expect_true(any(grepl("Subject ID: Analysis data", plot_data$Tooltip, fixed = TRUE)))
 })
 
 test_that("complexity display can force selected Subject ID labels", {
@@ -607,6 +637,30 @@ test_that("complexity display can force selected Subject ID labels", {
   expect_true(grepl("FallbackA=0.8", complexity_curve_annotation_text(curve_data), fixed = TRUE))
   expect_equal(unique(as.character(export$`Subject ID`)), "FallbackA")
   expect_identical(key, complexity_compute_key(data, params))
+})
+
+test_that("complexity subject display override only forces selected subjects", {
+  expect_null(complexity_subject_id_display_override(NULL))
+  expect_null(complexity_subject_id_display_override(""))
+  expect_null(complexity_subject_id_display_override(all_filter_value()))
+  expect_true(complexity_subject_id_display_override("FallbackA"))
+})
+
+test_that("complexity status chips render stage states", {
+  html <- paste(as.character(complexity_status_chips_ui(
+    quick_status = "complete",
+    hurst_status = "running",
+    curve_status = "failed",
+    mse_status = "idle"
+  )), collapse = "\n")
+
+  expect_true(grepl("cgm-complexity-status-chips", html, fixed = TRUE))
+  expect_true(grepl("cgm-status-chip-complete", html, fixed = TRUE))
+  expect_true(grepl("cgm-status-chip-running", html, fixed = TRUE))
+  expect_true(grepl("cgm-status-chip-failed", html, fixed = TRUE))
+  expect_true(grepl("Summary", html, fixed = TRUE))
+  expect_true(grepl("Hurst", html, fixed = TRUE))
+  expect_true(grepl("DFA/Higuchi", html, fixed = TRUE))
 })
 
 test_that("complexity summary cards report eligibility and parameters", {

@@ -707,9 +707,9 @@ imputation_summary_box_ui <- function(summary) {
   severity_class <- summary$severity_class[[1L]]
   subject_summary <- attr(summary, "subject_missingness", exact = TRUE)
   shiny::div(
-    class = paste("alert", paste0("alert-", severity_class), "mb-3"),
+    class = paste("cgm-review-panel", paste0("cgm-review-", severity_class), "mb-3"),
     shiny::div(
-      style = "display:flex; justify-content:space-between; gap:12px; align-items:flex-start;",
+      class = "cgm-review-header",
       shiny::div(
         shiny::strong(summary$severity[[1L]]),
         shiny::div(summary$message[[1L]])
@@ -740,7 +740,7 @@ imputation_summary_box_ui <- function(summary) {
         shiny::tags$hr(),
         shiny::h5("Missingness by Subject ID"),
         shiny::tags$div(
-          class = "table-responsive",
+          class = "table-responsive cgm-scroll-table",
           shiny::tags$table(
             class = "table table-condensed table-striped",
             shiny::tags$thead(
@@ -757,6 +757,98 @@ imputation_summary_box_ui <- function(summary) {
         )
       )
     }
+  )
+}
+
+data_status_summary <- function(
+  upload = NULL,
+  mapping = NULL,
+  standardized_data = NULL,
+  standardization_error = NULL,
+  settings = NULL
+) {
+  summary <- data_upload_summary(upload, standardized_data)
+  if (!nrow(summary)) {
+    return(summary)
+  }
+  validation <- data_validation_rows(
+    upload = upload,
+    mapping = mapping,
+    standardization_error = standardization_error,
+    settings = settings
+  )
+  review_count <- sum(validation$Status != "Ready")
+  validation_label <- if (review_count > 0L) {
+    paste(format_count(review_count), "review item(s)")
+  } else {
+    "Ready"
+  }
+  rbind(
+    summary,
+    data.frame(
+      Label = "Validation",
+      Value = validation_label,
+      stringsAsFactors = FALSE
+    )
+  )
+}
+
+data_status_strip_ui <- function(
+  upload = NULL,
+  mapping = NULL,
+  standardized_data = NULL,
+  standardization_error = NULL,
+  settings = NULL
+) {
+  summary <- data_status_summary(
+    upload = upload,
+    mapping = mapping,
+    standardized_data = standardized_data,
+    standardization_error = standardization_error,
+    settings = settings
+  )
+  if (!nrow(summary)) {
+    return(NULL)
+  }
+  shiny::div(
+    class = "cgm-data-status-strip",
+    shiny::h4("Current dataset"),
+    summary_card_ui(summary, compact = TRUE)
+  )
+}
+
+data_workflow_tabs_ui <- function(
+  setup_ui,
+  validate_ui,
+  impute_ui,
+  preview_ui
+) {
+  shiny::div(
+    class = "cgm-data-workflow",
+    shiny::tabsetPanel(
+      id = "data_stage_tabs",
+      type = "tabs",
+      shiny::tabPanel(
+        "Setup",
+        value = "setup",
+        shiny::div(class = "cgm-data-stage", setup_ui)
+      ),
+      shiny::tabPanel(
+        "Validate",
+        value = "validate",
+        shiny::div(class = "cgm-data-stage", validate_ui)
+      ),
+      shiny::tabPanel(
+        "Impute",
+        value = "impute",
+        shiny::div(class = "cgm-data-stage", impute_ui)
+      ),
+      shiny::tabPanel(
+        "Preview",
+        value = "preview",
+        shiny::div(class = "cgm-data-stage", preview_ui)
+      )
+    )
   )
 }
 
@@ -810,56 +902,35 @@ quality_summary_cards <- function(data, qc_summary, missingness_comparison, stud
   } else {
     sum(data$imputed_flag %in% TRUE, na.rm = TRUE)
   }
-  expected_duration <- if (is.data.frame(study_window) && "Expected days" %in% names(study_window)) {
-    values <- unique(study_window[["Expected days"]])
-    values <- values[!is.na(values)]
-    if (length(values)) values[[1L]] else NA_integer_
-  } else {
-    NA_integer_
-  }
-  short_windows <- if (is.data.frame(study_window) && "Shortfall days" %in% names(study_window)) {
-    sum(study_window[["Shortfall days"]] > 0L, na.rm = TRUE)
-  } else {
-    NA_integer_
-  }
-  full_missing_days <- if (is.data.frame(day_coverage) && "Full missing days" %in% names(day_coverage)) {
-    sum(day_coverage[["Full missing days"]], na.rm = TRUE)
-  } else {
-    NA_integer_
-  }
-  half_coverage_days <- if (is.data.frame(day_coverage) && "Half-day or worse coverage days" %in% names(day_coverage)) {
-    sum(day_coverage[["Half-day or worse coverage days"]], na.rm = TRUE)
-  } else {
-    NA_integer_
-  }
 
-  data.frame(
+  cards <- data.frame(
     Label = c(
       "Subject IDs",
       "Date span",
       "Valid days",
       "Timestamp gaps",
-      "Missing glucose",
-      "Filled rows",
-      "Expected duration",
-      "Short study windows",
-      "Full missing days",
-      "Low coverage days"
+      "Missing glucose"
     ),
     Value = c(
       format_count(length(subject_id_values(data))),
       format_date_span(data$timestamp),
       format_count(valid_days),
       format_count(timestamp_gaps),
-      format_count(missing_rows),
-      format_count(filled_rows),
-      if (is.na(expected_duration)) "Not set" else paste(format_count(expected_duration), "days"),
-      if (is.na(short_windows)) "Not set" else format_count(short_windows),
-      if (is.na(full_missing_days)) "0" else format_count(full_missing_days),
-      if (is.na(half_coverage_days)) "0" else format_count(half_coverage_days)
+      format_count(missing_rows)
     ),
     stringsAsFactors = FALSE
   )
+  if (!is.na(filled_rows) && filled_rows > 0L) {
+    cards <- rbind(
+      cards,
+      data.frame(
+        Label = "Filled rows",
+        Value = format_count(filled_rows),
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+  cards
 }
 
 plot_selection_summary <- function(

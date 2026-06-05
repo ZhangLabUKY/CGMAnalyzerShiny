@@ -8,7 +8,6 @@ upload_module_ui <- function(id) {
       multiple = TRUE,
       accept = c(".csv", ".txt", ".xlsx", ".xls")
     ),
-    shiny::actionButton(ns("load_example_complete"), "Load complete example"),
     shiny::actionButton(
       ns("load_example_missing_5pct"),
       "Load 5% missing example"
@@ -40,14 +39,6 @@ upload_preview_ui <- function(id) {
 upload_module_server <- function(id) {
   shiny::moduleServer(id, function(input, output, session) {
     selected_example <- shiny::reactiveVal(NULL)
-
-    shiny::observeEvent(
-      input$load_example_complete,
-      {
-        selected_example("complete")
-      },
-      ignoreInit = TRUE
-    )
 
     shiny::observeEvent(
       input$load_example_missing_5pct,
@@ -130,12 +121,6 @@ upload_module_server <- function(id) {
 
       switch(
         example,
-        complete = list(
-          data = cgm_timed("upload_load_example_complete", load_example_complete_cgm_data()),
-          files = "cgm_example_complete.csv",
-          demo = TRUE,
-          upload_mode = "single_file"
-        ),
         missing_5pct = list(
           data = cgm_timed("upload_load_example_5pct", load_example_missing_5pct_cgm_data()),
           files = "CGMExmplDat5Pct",

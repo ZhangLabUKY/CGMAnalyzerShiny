@@ -1,8 +1,5 @@
 test_that("prepare_metrics_display hides internal adapter columns", {
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+  demo <- example_missing_5pct_standardized()
   metrics <- compute_core_metrics(demo)
   display <- prepare_metrics_display(metrics)
 
@@ -12,10 +9,7 @@ test_that("prepare_metrics_display hides internal adapter columns", {
 })
 
 test_that("prepare_metrics_display returns readable long-format rows", {
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+  demo <- example_missing_5pct_standardized()
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
   expect_true(all(c("Subject ID", "Category", "Metric", "Definition", "Value", "Units") %in% names(display)))
@@ -29,10 +23,7 @@ test_that("prepare_metrics_display returns readable long-format rows", {
 })
 
 test_that("metric display avoids wide debug columns on demo metrics", {
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+  demo <- example_missing_5pct_standardized()
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
   expect_lte(ncol(display), 8)
@@ -40,10 +31,7 @@ test_that("metric display avoids wide debug columns on demo metrics", {
 })
 
 test_that("core range metrics and detailed bands use separate categories", {
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+  demo <- example_missing_5pct_standardized()
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
   core_range <- unique(display$Metric[display$Category == "Time in Range"])
@@ -101,10 +89,7 @@ test_that("range metric labels and definitions use current thresholds", {
     tar_level2 = 240
   )
   catalog <- metric_display_catalog(thresholds = thresholds)
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+  demo <- example_missing_5pct_standardized()
   display <- prepare_metrics_display(compute_base_core_metrics(demo, thresholds = thresholds), thresholds = thresholds)
 
   expect_true("Time in range (80-160 mg/dL)" %in% catalog$metric)
@@ -161,10 +146,7 @@ test_that("optional metric note is user-facing and hides internal wording", {
 })
 
 test_that("category filter can be excluded for stable summary cards", {
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+  demo <- example_missing_5pct_standardized()
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
   table_filtered <- filter_metrics_display(display, category = "Detailed Range Bands", include_category = TRUE)
@@ -177,10 +159,7 @@ test_that("category filter can be excluded for stable summary cards", {
 })
 
 test_that("metric summary cards use shared Label and Value structure", {
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+  demo <- example_missing_5pct_standardized()
   display <- prepare_metrics_display(compute_base_core_metrics(demo))
   cards <- metric_summary_cards(display)
 
@@ -191,10 +170,7 @@ test_that("metric summary cards use shared Label and Value structure", {
 })
 
 test_that("All filter sentinel returns all metric display rows", {
-  demo <- standardize_cgm_data(
-    load_example_complete_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
-  )
+  demo <- example_missing_5pct_standardized()
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
   filtered <- filter_metrics_display(

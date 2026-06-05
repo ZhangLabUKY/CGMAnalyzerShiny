@@ -3,21 +3,29 @@ column_mapping_module_ui <- function(id) {
   shiny::tagList(
     shiny::h3("Column Mapping"),
     shiny::uiOutput(ns("mapping_note")),
-    shiny::fluidRow(
-      shiny::column(4, shiny::uiOutput(ns("id_mapping_ui"))),
-      shiny::column(4, shiny::uiOutput(ns("timestamp_mapping_ui"))),
-      shiny::column(4, shiny::uiOutput(ns("glucose_mapping_ui")))
+    shiny::div(
+      class = "cgm-column-mapping-grid",
+      shiny::div(
+        class = "cgm-column-mapping-field cgm-column-mapping-field-subject",
+        shiny::uiOutput(ns("id_mapping_ui"))
+      ),
+      shiny::div(
+        class = "cgm-column-mapping-field cgm-column-mapping-field-timestamp",
+        shiny::uiOutput(ns("timestamp_mapping_ui"))
+      ),
+      shiny::div(
+        class = "cgm-column-mapping-field cgm-column-mapping-field-glucose",
+        shiny::uiOutput(ns("glucose_mapping_ui"))
+      )
     ),
-    shiny::fluidRow(
-      shiny::column(
-        4,
-        shiny::radioButtons(
-          ns("source_units"),
-          "Source units",
-          choices = c("mg/dL", "mmol/L"),
-          selected = "mg/dL",
-          inline = TRUE
-        )
+    shiny::div(
+      class = "cgm-column-mapping-units",
+      shiny::radioButtons(
+        ns("source_units"),
+        "Source units",
+        choices = c("mg/dL", "mmol/L"),
+        selected = "mg/dL",
+        inline = TRUE
       )
     ),
     shiny::div(
@@ -175,8 +183,8 @@ column_mapping_module_server <- function(id, uploaded) {
       upload <- uploaded()
       if (is_multi_file_upload(upload)) {
         shiny::tagList(
-          shiny::tags$label(subject_id_mapping_label(upload)),
-          shiny::div(class = "form-control", "File name")
+          shiny::tags$label(class = "control-label", subject_id_mapping_label(upload)),
+          shiny::div(class = "form-control cgm-static-mapping-value", "File name")
         )
       } else {
         choices <- mapping_choices_for_upload(upload)

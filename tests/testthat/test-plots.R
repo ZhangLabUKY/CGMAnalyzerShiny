@@ -63,6 +63,22 @@ test_that("plot empty states use plot-specific messages", {
   expect_equal(plot_label(create_agp_summary_plot(data)), plot_empty_message("agp"))
 })
 
+test_that("plot guidance and status chips render concise clinical notes", {
+  expect_match(plot_guidance_text("trace"), "Timeline")
+  expect_match(plot_guidance_text("daily_overlay"), "Within-day")
+  expect_match(plot_guidance_text("agp"), "percentile bands")
+  expect_null(plot_status_chip_ui(""))
+
+  html <- paste(as.character(plot_note_row_ui(
+    plot_status_chip_ui(plot_guidance_text("trace")),
+    plot_status_chip_ui("Interactive plot optimized for display.")
+  )), collapse = "\n")
+
+  expect_true(grepl("cgm-plot-note-row", html, fixed = TRUE))
+  expect_true(grepl("cgm-plot-status-chip", html, fixed = TRUE))
+  expect_true(grepl("Interactive plot optimized", html, fixed = TRUE))
+})
+
 test_that("time-of-day plot data keeps imputed rows identifiable", {
   data <- data.frame(
     id = rep("A", 4),
@@ -86,6 +102,38 @@ test_that("time-of-day plot data keeps imputed rows identifiable", {
   expect_equal(plot_data$date, c("2026-05-05", "2026-05-05", "2026-05-06", "2026-05-06"))
   expect_equal(plot_data$time_minutes, c(480, 485, 480, 485))
   expect_equal(sum(plot_data$imputed_flag), 1)
+  expect_true(all(grepl("Subject ID: A", plot_data$Tooltip, fixed = TRUE)))
+  expect_true(any(grepl("Imputed: Yes", plot_data$Tooltip, fixed = TRUE)))
+})
+
+test_that("trace and daily overlay plots include Plotly hover text context", {
+  data <- data.frame(
+    id = rep(c("A", "B"), each = 2),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 08:00:00",
+      "2026-05-05 08:05:00",
+      "2026-05-06 08:00:00",
+      "2026-05-06 08:05:00"
+    )),
+    glucose = c(80, 120, 90, 130),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = c(FALSE, TRUE, FALSE, FALSE),
+    stringsAsFactors = FALSE
+  )
+
+  trace_data <- ggplot2::ggplot_build(create_trace_plot(data))$data[[1]]
+  daily_data <- ggplot2::ggplot_build(create_daily_overlay_plot(data))$data[[1]]
+
+  expect_true("text" %in% names(trace_data))
+  expect_true("text" %in% names(daily_data))
+  expect_true(any(grepl("Subject ID: A", trace_data$text, fixed = TRUE)))
+  expect_true(any(grepl("Timestamp:", trace_data$text, fixed = TRUE)))
+  expect_true(any(grepl("Glucose:", trace_data$text, fixed = TRUE)))
+  expect_true(any(grepl("Date:", daily_data$text, fixed = TRUE)))
+  expect_true(any(grepl("Time:", daily_data$text, fixed = TRUE)))
 })
 
 test_that("plot display data respects point budgets and keeps imputed rows when possible", {
@@ -459,14 +507,17 @@ test_that("AGP plot has legend-bearing percentile bands and median line", {
   expect_true("25th-75th percentile band" %in% fills)
   expect_true("Target range (70-180 mg/dL)" %in% fill_scale$breaks)
   expect_true("Median glucose" %in% colors)
-  expect_equal(unname(fill_scale$palette(3)), c("#7B8288", "#7BC8F6", "#1F78B4"))
-  expect_equal(unname(color_scale$palette(1)), "#111111")
+  expect_equal(unname(fill_scale$palette(3)), c("#DDEDE6", "#86C7B5", "#22B883"))
+  expect_equal(unname(color_scale$palette(1)), "#176F50")
   expect_length(ribbon_idx, 2)
   expect_length(rect_idx, 1)
   expect_true(length(line_idx) >= 1)
   expect_true(all(ribbon_idx < rect_idx))
   expect_true(all(rect_idx < line_idx))
   expect_equal(plot$layers[[rect_idx]]$aes_params$alpha, 0.42)
+  expect_true(any(vapply(ggplot2::ggplot_build(plot)$data, function(layer_data) {
+    "text" %in% names(layer_data) && any(grepl("Time of day:", layer_data$text, fixed = TRUE))
+  }, logical(1))))
 })
 
 test_that("plots module rendering does not depend on metrics or complexity results", {
@@ -505,6 +556,12 @@ test_that("plot filter helper selects relevant controls by plot type", {
   expect_equal(plot_filter_layout_order("trace"), c("subject_filter", "group_filter"))
   expect_equal(plot_filter_layout_order("agp"), c("subject_filter", "group_filter"))
   expect_equal(plot_filter_layout_order("daily_overlay"), c("day_filter", "subject_filter", "group_filter"))
+
+  html <- paste(as.character(plot_filter_layout_ui(shiny::NS("plots"), "daily_overlay")), collapse = "\n")
+  expect_true(grepl("cgm-plots-filter-bar", html, fixed = TRUE))
+  expect_true(grepl("plots-plot_type", html, fixed = TRUE))
+  expect_true(grepl("plots-day_filter", html, fixed = TRUE))
+  expect_true(grepl("plots-subject_filter", html, fixed = TRUE))
 })
 
 test_that("plots module uses normalized day values for active plot cache", {
@@ -578,4 +635,40 @@ test_that("AGP plotly legend names are clean", {
   expect_gt(plotly_obj$x$layout$legend$y, 1)
   expect_gte(plotly_obj$x$layout$margin$t, 80)
   expect_gte(plotly_obj$x$layout$margin$b, 70)
+})
+
+test_that("AGP plotly visual traces remain continuous and finite", {
+  data <- data.frame(
+    id = rep(c("A", "B"), each = 96),
+    timestamp = parse_cgm_timestamp("2026-05-05 00:00:00") + rep(seq(0, by = 900, length.out = 96), 2),
+    glucose = c(
+      100 + 20 * sin(seq(0, 2 * pi, length.out = 96)),
+      120 + 15 * cos(seq(0, 2 * pi, length.out = 96))
+    ),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+  plotly_obj <- layout_agp_plotly(plotly::ggplotly(create_agp_summary_plot(data, bin_minutes = 30), tooltip = "text"))
+  traces <- plotly_obj$x$data
+  trace_by_name <- function(name) {
+    matches <- vapply(traces, function(trace) identical(trace$name %||% "", name), logical(1))
+    traces[[which(matches)[[1L]]]]
+  }
+  outer_band <- trace_by_name("5th-95th percentile band")
+  inner_band <- trace_by_name("25th-75th percentile band")
+  target_band <- trace_by_name("Target range (70-180 mg/dL)")
+  median_line <- trace_by_name("Median glucose")
+
+  expect_false(any(is.na(outer_band$x)))
+  expect_false(any(is.na(inner_band$x)))
+  expect_false(any(is.na(median_line$x)))
+  expect_true(all(is.finite(unlist(target_band$x))))
+  expect_true(all(is.finite(unlist(target_band$y))))
+  expect_gt(length(outer_band$x), 50)
+  expect_gt(length(inner_band$x), 50)
+  expect_gt(length(median_line$x), 40)
 })

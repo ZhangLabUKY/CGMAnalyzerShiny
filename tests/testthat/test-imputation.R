@@ -242,6 +242,107 @@ test_that("CGMissingDataR adapter passes hidden defaults and analysis date study
   expect_equal(captured$feature_cols, "sex")
 })
 
+test_that("imputation settings run separately per Subject ID for auto models", {
+  make_subject <- function(id, n, missing) {
+    data.frame(
+      id = id,
+      timestamp = parse_cgm_timestamp("2026-06-01 00:00:00") + seq(0, by = 300, length.out = n),
+      glucose = replace(rep(100, n), missing, NA_real_),
+      imputed_flag = FALSE,
+      stringsAsFactors = FALSE
+    )
+  }
+  data <- rbind(
+    make_subject("A", 20, 1),
+    make_subject("B", 10, c(1, 2)),
+    make_subject("C", 5, integer())
+  )
+  captured <- data.frame(id = character(), model = character(), seed = integer())
+  local_mocked_bindings(
+    run_cgmissingdata_imputation = function(data, seed, model, ...) {
+      id <- unique(as.character(data$id))
+      captured <<- rbind(
+        captured,
+        data.frame(id = id, model = model, seed = seed, stringsAsFactors = FALSE)
+      )
+      method <- if (identical(id, "A")) "MICE+ARIMA" else "MICE+XGBoost"
+      data.frame(
+        .row_id = seq_len(nrow(data)),
+        glucose = data$glucose,
+        imputed_glucose_value = ifelse(is.na(data$glucose), 111, data$glucose),
+        imputation_method = method,
+        missing_rate = mean(is.na(data$glucose)),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+
+  result <- apply_imputation_settings(
+    data,
+    list(
+      imputation_method = "mice_only",
+      imputation_model = "auto",
+      imputation_available = TRUE,
+      imputation_seed = 100,
+      imputation_interval_minutes = 5L
+    )
+  )
+
+  expect_equal(captured$id, c("A", "B"))
+  expect_equal(captured$model, c("auto", "auto"))
+  expect_equal(captured$seed, c(100L, 101L))
+  expect_equal(sum(result$imputed_flag %in% TRUE), 3L)
+  expect_false(any(result$imputed_flag %in% TRUE & result$id == "C"))
+  expect_equal(attr(result, "imputation_method"), c("MICE+ARIMA", "MICE+XGBoost"))
+  expect_equal(
+    attr(result, "imputation_method_by_subject")[["Subject ID"]],
+    c("A", "B")
+  )
+  expect_equal(
+    attr(result, "imputation_method_by_subject")$Method,
+    c("MICE+ARIMA", "MICE+XGBoost")
+  )
+})
+
+test_that("imputation settings run explicit models per Subject ID", {
+  data <- data.frame(
+    id = rep(c("A", "B"), each = 2),
+    timestamp = rep(parse_cgm_timestamp(c("2026-06-01 00:00:00", "2026-06-01 00:05:00")), 2),
+    glucose = c(100, NA, 120, NA),
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+  captured_models <- character()
+  local_mocked_bindings(
+    run_cgmissingdata_imputation = function(data, model, ...) {
+      captured_models <<- c(captured_models, model)
+      data.frame(
+        .row_id = seq_len(nrow(data)),
+        glucose = data$glucose,
+        imputed_glucose_value = ifelse(is.na(data$glucose), 111, data$glucose),
+        imputation_method = "MICE+kNN",
+        missing_rate = mean(is.na(data$glucose)),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+
+  result <- apply_imputation_settings(
+    data,
+    list(
+      imputation_method = "mice_only",
+      imputation_model = "knn",
+      imputation_available = TRUE,
+      imputation_interval_minutes = 5L
+    )
+  )
+
+  expect_equal(captured_models, c("knn", "knn"))
+  expect_equal(sum(result$imputed_flag %in% TRUE), 2L)
+  expect_equal(attr(result, "imputation_method"), "MICE+kNN")
+  expect_equal(nrow(attr(result, "imputation_method_by_subject")), 2L)
+})
+
 test_that("CGMissingDataR call helper passes only supported fixed-signature arguments", {
   captured <- NULL
   fake <- function(data, models, n_threads, prefer_cgmanalyzer_equal_interval) {

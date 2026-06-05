@@ -6,7 +6,7 @@ cgmissingdata_function <- function() {
   if (!"run_missing_glucose_imputation" %in% exports) {
     return(NULL)
   }
-  getExportedValue("CGMissingDataR", "run_missing_glucose_imputation")
+  CGMissingDataR::run_missing_glucose_imputation
 }
 
 cgmissingdata_version <- function() {
@@ -27,6 +27,11 @@ cgmissingdata_available <- function() {
 first_non_missing <- function(x, default = NA) {
   x <- x[!is.na(x)]
   if (!length(x)) default else x[[1L]]
+}
+
+unique_non_missing <- function(x) {
+  x <- unique(x[!is.na(x)])
+  x[nzchar(trimws(as.character(x)))]
 }
 
 imputation_metadata_columns <- function(data) {
@@ -398,16 +403,153 @@ apply_imputed_glucose <- function(data, imputation_result) {
   out <- append_inserted_imputation_rows(out, data, imputed, row_id)
 
   if ("imputation_method" %in% names(imputed)) {
-    attr(out, "imputation_method") <- first_non_missing(unique(as.character(imputed$imputation_method)), NA_character_)
+    attr(out, "imputation_method") <- unique_non_missing(as.character(imputed$imputation_method))
   }
   if ("missing_rate" %in% names(imputed)) {
-    attr(out, "imputation_missing_rate") <- first_non_missing(unique(as.numeric(imputed$missing_rate)), NA_real_)
+    attr(out, "imputation_missing_rate") <- unique(as.numeric(imputed$missing_rate))
   }
   attr(out, "imputation_model") <- attr(imputation_result, "cgmissingdata_model", exact = TRUE) %||% NA_character_
   attr(out, "imputation_backend") <- attr(imputation_result, "cgmissingdata_backend", exact = TRUE) %||% NA_character_
   attr(out, "imputation_warning_threshold") <- attr(imputation_result, "cgmissingdata_warning_threshold", exact = TRUE) %||% NA_real_
   attr(out, "imputation_warnings") <- attr(imputation_result, "cgmissingdata_warnings", exact = TRUE) %||% character()
   out
+}
+
+combine_subject_imputation_outputs <- function(subject_outputs, model, backend, warning_threshold) {
+  combined <- data.table::rbindlist(
+    lapply(subject_outputs, function(x) data.table::as.data.table(x)),
+    fill = TRUE
+  )
+  data.table::setorder(combined, id, timestamp)
+  out <- as.data.frame(combined)
+
+  methods <- unlist(lapply(subject_outputs, function(x) {
+    attr(x, "imputation_method", exact = TRUE) %||% character()
+  }), use.names = FALSE)
+  rates <- unlist(lapply(subject_outputs, function(x) {
+    attr(x, "imputation_missing_rate", exact = TRUE) %||% numeric()
+  }), use.names = FALSE)
+  warnings <- unlist(lapply(subject_outputs, function(x) {
+    attr(x, "imputation_warnings", exact = TRUE) %||% character()
+  }), use.names = FALSE)
+
+  attr(out, "imputation_method") <- unique_non_missing(as.character(methods))
+  attr(out, "imputation_missing_rate") <- unique(rates[is.finite(rates)])
+  attr(out, "imputation_model") <- model
+  attr(out, "imputation_backend") <- backend
+  attr(out, "imputation_warning_threshold") <- warning_threshold
+  attr(out, "imputation_warnings") <- unique_non_missing(as.character(warnings))
+  method_records <- lapply(subject_outputs, function(x) {
+    attr(x, "imputation_method_by_subject", exact = TRUE)
+  })
+  method_records <- method_records[vapply(method_records, is.data.frame, logical(1))]
+  if (length(method_records)) {
+    records <- data.table::rbindlist(method_records, fill = TRUE)
+    attr(out, "imputation_method_by_subject") <- as.data.frame(records)
+  }
+  out
+}
+
+prefix_subject_imputation_warnings <- function(warnings, subject_id) {
+  warnings <- unique_non_missing(as.character(warnings %||% character()))
+  if (!length(warnings)) {
+    return(character())
+  }
+  vapply(warnings, function(warning) {
+    if (grepl("^Number of logged events:", warning, ignore.case = TRUE)) {
+      return(warning)
+    }
+    warning <- gsub(
+      "Subject [^[:space:]]+ has a contiguous missing block",
+      paste("Subject", subject_id, "has a contiguous missing block"),
+      warning
+    )
+    if (grepl("^Subject ", warning)) {
+      return(warning)
+    }
+    paste0("Subject ", subject_id, ": ", warning)
+  }, character(1), USE.NAMES = FALSE)
+}
+
+subject_imputation_method_record <- function(subject_id, subject_output) {
+  methods <- attr(subject_output, "imputation_method", exact = TRUE) %||% character()
+  methods <- unique_non_missing(as.character(methods))
+  rates <- suppressWarnings(as.numeric(attr(subject_output, "imputation_missing_rate", exact = TRUE) %||% NA_real_))
+  rates <- rates[is.finite(rates)]
+  if (!length(methods)) {
+    return(NULL)
+  }
+  data.frame(
+    `Subject ID` = subject_id,
+    Method = methods[[1L]],
+    `Missing rate` = if (length(rates)) rates[[1L]] else NA_real_,
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+}
+
+apply_subject_imputation_settings <- function(
+  data,
+  settings,
+  interval_minutes = 5L
+) {
+  ids <- unique(as.character(data$id))
+  base_seed <- settings$imputation_seed %||% 42
+  model <- settings$imputation_model %||% "auto"
+  backend <- settings$imputation_backend %||% "mice"
+  warning_threshold <- settings$imputation_missing_warning_threshold %||% 0.20
+  outputs <- vector("list", length(ids))
+
+  for (i in seq_along(ids)) {
+    subject_data <- data[as.character(data$id) == ids[[i]], , drop = FALSE]
+    subject_summary <- imputation_candidate_summary(
+      subject_data,
+      interval_minutes = interval_minutes
+    )
+    if (!isTRUE(subject_summary$missing_candidates[[1L]] > 0L)) {
+      outputs[[i]] <- subject_data
+      next
+    }
+
+    result <- run_cgmissingdata_imputation(
+      subject_data,
+      seed = base_seed + i - 1L,
+      backend = backend,
+      model = model,
+      interval_minutes = interval_minutes,
+      missing_warning_threshold = warning_threshold,
+      arima_threshold = settings$imputation_arima_threshold %||% 0.05,
+      arima_order = settings$imputation_arima_order %||% c(4L, 1L, 0L),
+      arima_min_history = settings$imputation_arima_min_history %||% 20L,
+      xgb_rounds = settings$imputation_xgb_rounds %||% 300L,
+      rf_trees = settings$imputation_rf_trees %||% 200L,
+      knn_k = settings$imputation_knn_k %||% 7L,
+      lgb_rounds = settings$imputation_lgb_rounds %||% 400L,
+      lag_values = settings$imputation_lag_values %||% c(1L, 2L, 3L),
+      add_rollmean = settings$imputation_add_rollmean %||% TRUE,
+      roll_window = settings$imputation_roll_window %||% 3L,
+      study_start = settings$imputation_study_start,
+      study_end = settings$imputation_study_end,
+      candidate_summary = subject_summary
+    )
+    subject_output <- apply_imputed_glucose(subject_data, result)
+    attr(subject_output, "imputation_warnings") <- prefix_subject_imputation_warnings(
+      attr(subject_output, "imputation_warnings", exact = TRUE),
+      ids[[i]]
+    )
+    method_record <- subject_imputation_method_record(ids[[i]], subject_output)
+    if (is.data.frame(method_record)) {
+      attr(subject_output, "imputation_method_by_subject") <- method_record
+    }
+    outputs[[i]] <- subject_output
+  }
+
+  combine_subject_imputation_outputs(
+    outputs,
+    model = model,
+    backend = backend,
+    warning_threshold = warning_threshold
+  )
 }
 
 apply_imputation_settings <- function(data, settings, precomputed = NULL) {
@@ -429,31 +571,13 @@ apply_imputation_settings <- function(data, settings, precomputed = NULL) {
     "analysis_data_imputation_total",
     tryCatch(
       {
-      result <- run_cgmissingdata_imputation(
-        data,
-        seed = settings$imputation_seed %||% 42,
-        backend = settings$imputation_backend %||% "mice",
-        model = settings$imputation_model %||% "auto",
-        interval_minutes = interval_minutes,
-        missing_warning_threshold = settings$imputation_missing_warning_threshold %||% 0.20,
-        arima_threshold = settings$imputation_arima_threshold %||% 0.05,
-        arima_order = settings$imputation_arima_order %||% c(4L, 1L, 0L),
-        arima_min_history = settings$imputation_arima_min_history %||% 20L,
-        xgb_rounds = settings$imputation_xgb_rounds %||% 300L,
-        rf_trees = settings$imputation_rf_trees %||% 200L,
-        knn_k = settings$imputation_knn_k %||% 7L,
-        lgb_rounds = settings$imputation_lgb_rounds %||% 400L,
-        lag_values = settings$imputation_lag_values %||% c(1L, 2L, 3L),
-        add_rollmean = settings$imputation_add_rollmean %||% TRUE,
-        roll_window = settings$imputation_roll_window %||% 3L,
-        study_start = settings$imputation_study_start,
-        study_end = settings$imputation_study_end,
-        precomputed = precomputed,
-        candidate_summary = candidate_summary
-      )
         cgm_timed(
           "analysis_data_imputation_apply_result",
-          apply_imputed_glucose(data, result)
+          apply_subject_imputation_settings(
+            data,
+            settings,
+            interval_minutes = interval_minutes
+          )
         )
       },
       error = function(error) {

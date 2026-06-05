@@ -714,6 +714,7 @@ test_that("imputation status reports off, unavailable, no-missing, and applied s
   expect_equal(could_not_apply$Status, "Could not apply")
   expect_equal(no_rows_filled$Status, "No rows filled")
   expect_equal(applied$Model, "ARIMA")
+  expect_equal(applied[["Method details"]], "")
   expect_false("Backend" %in% names(could_not_apply))
   expect_equal(applied[["Missing warning threshold (%)"]], 20)
   expect_equal(warning_status$Warnings, "High missingness exceeds warning threshold")
@@ -728,6 +729,54 @@ test_that("imputation status reports off, unavailable, no-missing, and applied s
   expect_equal(applied[["Estimated missing readings from gaps"]], 2)
   expect_false("CGMissingDataR available" %in% names(applied))
   expect_false(any(grepl("CGMissingDataR|adapter|engine", unlist(applied), ignore.case = TRUE)))
+})
+
+test_that("imputation status reports mixed subject-level methods", {
+  standardized <- missingness_fixture()
+  analysis <- standardized
+  analysis$glucose[is.na(analysis$glucose)] <- 123
+  analysis$imputed_flag <- is.na(standardized$glucose)
+  attr(analysis, "imputation_method") <- c("MICE+XGBoost", "MICE+ARIMA", "MICE+ARIMA")
+  attr(analysis, "imputation_method_by_subject") <- data.frame(
+    `Subject ID` = c("A", "B", "C"),
+    Method = c("MICE+XGBoost", "MICE+ARIMA", "MICE+ARIMA"),
+    `Missing rate` = c(0.15, 0.03, 0.04),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+  attr(analysis, "imputation_model") <- "auto"
+  attr(analysis, "imputation_missing_rate") <- c(0.15, 0.03)
+
+  status <- summarize_imputation_status(
+    standardized,
+    analysis,
+    list(
+      imputation_method = "mice_only",
+      imputation_model = "auto",
+      imputation_available = TRUE,
+      imputation_interval_minutes = 60
+    )
+  )
+
+  expect_equal(status$Method, "MICE + ARIMA / XGBoost")
+  expect_equal(status$Model, "Auto")
+  expect_equal(status[["Method details"]], "ARIMA: 2 Subject ID(s); XGBoost: 1 Subject ID(s)")
+})
+
+test_that("imputation method details use true subject-level counts", {
+  method_by_subject <- data.frame(
+    `Subject ID` = paste0("S", seq_len(13)),
+    Method = c(rep("MICE+ARIMA", 6), rep("MICE+XGBoost", 7)),
+    `Missing rate` = c(rep(0.03, 6), rep(0.12, 7)),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  expect_equal(
+    imputation_method_details(method_by_subject),
+    "XGBoost: 7 Subject ID(s); ARIMA: 6 Subject ID(s)"
+  )
+  expect_equal(imputation_method_details(c("MICE+ARIMA", "MICE+XGBoost")), "")
 })
 
 test_that("preprocessing comparison summary appears only when imputation is selected", {

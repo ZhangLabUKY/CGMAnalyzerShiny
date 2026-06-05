@@ -6,6 +6,98 @@
 #'
 #' @return A ggplot object.
 #' @noRd
+clinical_plot_theme <- function(legend_position = "bottom") {
+  ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(
+      text = ggplot2::element_text(color = "#263642"),
+      axis.title = ggplot2::element_text(color = "#263642", face = "bold"),
+      axis.text = ggplot2::element_text(color = "#3c4e5c"),
+      panel.grid.major = ggplot2::element_line(color = "#dfe8e4", linewidth = 0.35),
+      panel.grid.minor = ggplot2::element_line(color = "#edf3f0", linewidth = 0.25),
+      legend.position = legend_position,
+      legend.title = ggplot2::element_text(color = "#263642", face = "bold"),
+      legend.text = ggplot2::element_text(color = "#3c4e5c"),
+      plot.margin = ggplot2::margin(t = 8, r = 12, b = 12, l = 8)
+    )
+}
+
+clinical_discrete_palette <- function(values) {
+  values <- sort(unique(as.character(values)))
+  values <- values[!is.na(values) & nzchar(values)]
+  base <- c("#1F8A70", "#2F80ED", "#7C3AED", "#D99013", "#C95142", "#2A9D8F", "#5B6770", "#22B883")
+  if (length(values) > length(base)) {
+    base <- grDevices::colorRampPalette(base)(length(values))
+  }
+  stats::setNames(base[seq_along(values)], values)
+}
+
+format_plot_timestamp <- function(timestamp) {
+  out <- format(timestamp, "%Y-%m-%d %H:%M:%S", tz = "UTC")
+  out[is.na(timestamp)] <- "Not available"
+  out
+}
+
+format_plot_time_of_day <- function(minutes) {
+  minutes <- suppressWarnings(as.numeric(minutes))
+  hours <- floor(minutes / 60)
+  mins <- floor(minutes %% 60)
+  ifelse(is.na(minutes), "Not available", sprintf("%02d:%02d", hours, mins))
+}
+
+format_plot_glucose <- function(glucose) {
+  glucose <- suppressWarnings(as.numeric(glucose))
+  ifelse(is.na(glucose), "Not available", paste0(round(glucose, 1), " mg/dL"))
+}
+
+plot_imputed_label <- function(imputed_flag) {
+  ifelse(imputed_flag %in% TRUE, "Yes", "No")
+}
+
+ensure_plot_imputed_flag <- function(data) {
+  if (!"imputed_flag" %in% names(data)) {
+    data$imputed_flag <- FALSE
+  }
+  data
+}
+
+trace_hover_text <- function(data) {
+  paste0(
+    "Subject ID: ", data$id,
+    "<br>Timestamp: ", format_plot_timestamp(data$timestamp),
+    "<br>Glucose: ", format_plot_glucose(data$glucose),
+    "<br>Imputed: ", plot_imputed_label(data$imputed_flag)
+  )
+}
+
+daily_overlay_hover_text <- function(data) {
+  paste0(
+    "Subject ID: ", data$id,
+    "<br>Date: ", data$date,
+    "<br>Time: ", format_plot_time_of_day(data$time_minutes),
+    "<br>Glucose: ", format_plot_glucose(data$glucose),
+    "<br>Imputed: ", plot_imputed_label(data$imputed_flag)
+  )
+}
+
+agp_hover_text <- function(data, value = "median") {
+  value <- value %||% "median"
+  label <- switch(
+    value,
+    q05 = "5th percentile",
+    q25 = "25th percentile",
+    q75 = "75th percentile",
+    q95 = "95th percentile",
+    median = "Median glucose",
+    "Glucose"
+  )
+  values <- data[[value]] %||% rep(NA_real_, nrow(data))
+  paste0(
+    "Time of day: ", format_plot_time_of_day(data$time_minutes),
+    "<br>", label, ": ", format_plot_glucose(values),
+    "<br>Readings: ", data$n
+  )
+}
+
 create_trace_plot <- function(
   data,
   thresholds = default_cgm_thresholds(),
@@ -20,22 +112,24 @@ create_trace_plot <- function(
   if (!nrow(data)) {
     return(empty_plot(plot_empty_message("trace")))
   }
+  data <- ensure_plot_imputed_flag(data)
+  data$Tooltip <- trace_hover_text(data)
 
-  ggplot2::ggplot(data, ggplot2::aes(x = timestamp, y = glucose, color = id, group = id)) +
+  ggplot2::ggplot(data, ggplot2::aes(x = timestamp, y = glucose, color = id, group = id, text = Tooltip)) +
     ggplot2::geom_line(alpha = 0.8, linewidth = 0.35, na.rm = TRUE) +
-    ggplot2::geom_point(
+    suppressWarnings(ggplot2::geom_point(
       data = data[data$imputed_flag %in% TRUE, , drop = FALSE],
-      ggplot2::aes(x = timestamp, y = glucose),
+      ggplot2::aes(x = timestamp, y = glucose, text = Tooltip),
       inherit.aes = FALSE,
       size = 1.6,
       alpha = 0.9,
       na.rm = TRUE
-    ) +
-    ggplot2::geom_hline(yintercept = thresholds$tir_lower, linetype = "dashed", color = "#B42318") +
-    ggplot2::geom_hline(yintercept = thresholds$tir_upper, linetype = "dashed", color = "#B42318") +
+    )) +
+    ggplot2::geom_hline(yintercept = thresholds$tir_lower, linetype = "dashed", color = "#C95142") +
+    ggplot2::geom_hline(yintercept = thresholds$tir_upper, linetype = "dashed", color = "#C95142") +
+    ggplot2::scale_color_manual(values = clinical_discrete_palette(data$id)) +
     ggplot2::labs(x = NULL, y = "Glucose (mg/dL)", color = "Subject ID") +
-    ggplot2::theme_minimal(base_size = 12) +
-    ggplot2::theme(legend.position = "bottom")
+    clinical_plot_theme(legend_position = "bottom")
 }
 
 plot_detail_choices <- function() {
@@ -400,6 +494,7 @@ prepare_time_of_day_plot_data <- function(
   data <- filter_plot_data(data, participant = participant, group = group, day = day)
   data <- data[is_finite_cgm_timestamp(data$timestamp), , drop = FALSE]
   data <- prepare_plot_display_data(data, max_points_per_participant = max_points_per_participant)
+  data <- ensure_plot_imputed_flag(data)
   if (!nrow(data)) {
     return(data.frame(
       id = character(),
@@ -415,6 +510,7 @@ prepare_time_of_day_plot_data <- function(
   data$date <- as.character(as.Date(data$timestamp))
   data$time_minutes <- timestamp$hour * 60 + timestamp$min + timestamp$sec / 60
   data$plot_group <- interaction(data$id, data$date, drop = TRUE, lex.order = TRUE)
+  data$Tooltip <- daily_overlay_hover_text(data)
   data[order(data$id, data$date, data$time_minutes), , drop = FALSE]
 }
 
@@ -464,23 +560,23 @@ create_daily_overlay_plot <- function(
   show_date_legend <- daily_overlay_legend_visible(length(unique(plot_data$date)), date_legend_limit)
   plot <- ggplot2::ggplot(
     plot_data,
-    ggplot2::aes(x = time_minutes, y = glucose, color = date, group = plot_group)
+    ggplot2::aes(x = time_minutes, y = glucose, color = date, group = plot_group, text = Tooltip)
   ) +
     ggplot2::geom_line(alpha = 0.75, linewidth = 0.35, na.rm = TRUE) +
-    ggplot2::geom_point(
+    suppressWarnings(ggplot2::geom_point(
       data = plot_data[plot_data$imputed_flag %in% TRUE, , drop = FALSE],
-      ggplot2::aes(x = time_minutes, y = glucose),
+      ggplot2::aes(x = time_minutes, y = glucose, text = Tooltip),
       inherit.aes = FALSE,
       size = 1.6,
       alpha = 0.9,
       na.rm = TRUE
-    ) +
-    ggplot2::geom_hline(yintercept = thresholds$tir_lower, linetype = "dashed", color = "#B42318") +
-    ggplot2::geom_hline(yintercept = thresholds$tir_upper, linetype = "dashed", color = "#B42318") +
+    )) +
+    ggplot2::geom_hline(yintercept = thresholds$tir_lower, linetype = "dashed", color = "#C95142") +
+    ggplot2::geom_hline(yintercept = thresholds$tir_upper, linetype = "dashed", color = "#C95142") +
+    ggplot2::scale_color_manual(values = clinical_discrete_palette(plot_data$date)) +
     time_of_day_scale() +
     ggplot2::labs(x = "Time of day", y = "Glucose (mg/dL)", color = "Date") +
-    ggplot2::theme_minimal(base_size = 12) +
-    ggplot2::theme(legend.position = if (show_date_legend) "bottom" else "none")
+    clinical_plot_theme(legend_position = if (show_date_legend) "bottom" else "none")
 
   if (length(unique(plot_data$id)) > 1L) {
     plot <- plot + ggplot2::facet_wrap(~id)
@@ -546,13 +642,14 @@ create_agp_summary_plot <- function(
 
   target_label <- target_range_label(thresholds)
   target_data <- data.frame(
-    xmin = -Inf,
-    xmax = Inf,
+    xmin = 0,
+    xmax = 1440,
     ymin = thresholds$tir_lower,
     ymax = thresholds$tir_upper,
     range = target_label,
     stringsAsFactors = FALSE
   )
+  agp$Tooltip_median <- agp_hover_text(agp, "median")
 
   ggplot2::ggplot(agp, ggplot2::aes(x = time_minutes)) +
     ggplot2::geom_ribbon(
@@ -576,20 +673,27 @@ create_agp_summary_plot <- function(
       alpha = 0.42
     ) +
     ggplot2::geom_line(ggplot2::aes(y = median, color = "Median glucose"), linewidth = 1.05) +
+    suppressWarnings(ggplot2::geom_point(
+      ggplot2::aes(y = median, text = Tooltip_median),
+      inherit.aes = TRUE,
+      show.legend = FALSE,
+      alpha = 0.01,
+      size = 1.2
+    )) +
     ggplot2::geom_hline(yintercept = thresholds$tir_lower, linetype = "dotted", color = "#5F6368", alpha = 0.65) +
     ggplot2::geom_hline(yintercept = thresholds$tir_upper, linetype = "dotted", color = "#5F6368", alpha = 0.65) +
     ggplot2::scale_fill_manual(
       name = NULL,
       values = c(
-        stats::setNames("#7B8288", target_label),
-        "5th-95th percentile band" = "#7BC8F6",
-        "25th-75th percentile band" = "#1F78B4"
+        stats::setNames("#DDEDE6", target_label),
+        "5th-95th percentile band" = "#86C7B5",
+        "25th-75th percentile band" = "#22B883"
       ),
       breaks = c(target_label, "5th-95th percentile band", "25th-75th percentile band")
     ) +
     ggplot2::scale_color_manual(
       name = NULL,
-      values = c("Median glucose" = "#111111"),
+      values = c("Median glucose" = "#176F50"),
       breaks = "Median glucose"
     ) +
     time_of_day_scale() +
@@ -598,11 +702,9 @@ create_agp_summary_plot <- function(
       fill = ggplot2::guide_legend(order = 1, override.aes = list(alpha = c(0.42, 0.68, 0.84))),
       color = ggplot2::guide_legend(order = 2)
     ) +
-    ggplot2::theme_minimal(base_size = 12) +
+    clinical_plot_theme(legend_position = "top") +
     ggplot2::theme(
-      legend.position = "top",
-      legend.box = "horizontal",
-      plot.margin = ggplot2::margin(t = 8, r = 12, b = 12, l = 8)
+      legend.box = "horizontal"
     )
 }
 

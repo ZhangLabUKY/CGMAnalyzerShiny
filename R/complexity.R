@@ -1519,13 +1519,13 @@ create_complexity_summary_plot <- function(plot_data, metric = all_filter_value(
     ggplot2::aes(
       x = `Subject ID`,
       y = Value,
-      color = Metric,
+      color = `Subject ID`,
       text = Tooltip
     )
   ) +
     ggplot2::geom_point(size = 2.8, alpha = 0.9, na.rm = TRUE) +
     ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = 0.18, add = 0.02)) +
-    ggplot2::labs(x = "Subject ID", y = "Metric value", color = "Metric") +
+    ggplot2::labs(x = "Subject ID", y = "Metric value", color = "Subject ID") +
     ggplot2::theme_minimal(base_size = 12) +
     ggplot2::theme(
       legend.position = "bottom",
@@ -1534,12 +1534,11 @@ create_complexity_summary_plot <- function(plot_data, metric = all_filter_value(
 
   if (!nzchar(selected)) {
     plot <- plot +
-      ggplot2::facet_wrap(~Metric, scales = "free_y") +
-      ggplot2::guides(color = "none")
+      ggplot2::facet_wrap(~Metric, scales = "free_y")
   } else {
     plot <- plot +
       ggplot2::labs(y = selected) +
-      ggplot2::guides(color = "none")
+      ggplot2::guides(color = ggplot2::guide_legend(title = "Subject ID"))
   }
 
   plot

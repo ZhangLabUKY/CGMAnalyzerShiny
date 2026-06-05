@@ -1,32 +1,83 @@
 preprocessing_module_ui <- function(id) {
+  shiny::tagList(
+    preprocessing_settings_ui(id),
+    preprocessing_imputation_ui(id)
+  )
+}
+
+preprocessing_settings_ui <- function(id) {
   ns <- shiny::NS(id)
   shiny::tagList(
     shiny::h3("Preprocessing settings"),
-    shiny::fluidRow(
-      shiny::column(2, shiny::numericInput(ns("tir_lower"), "TIR lower", value = 70, min = 1)),
-      shiny::column(2, shiny::numericInput(ns("tir_upper"), "TIR upper", value = 180, min = 1)),
-      shiny::column(2, shiny::numericInput(ns("tbr_level2"), "TBR level 2", value = 54, min = 1)),
-      shiny::column(2, shiny::numericInput(ns("tar_level2"), "TAR level 2", value = 250, min = 1)),
-      shiny::column(2, shiny::numericInput(ns("valid_day_hours"), "Valid day hours", value = 14, min = 1, max = 24))
-    ),
-    shiny::fluidRow(
-      shiny::column(4, shiny::uiOutput(ns("analysis_date_range_ui"))),
-      shiny::column(
-        3,
-        shiny::numericInput(
-          ns("expected_study_duration_days"),
-          "Expected study duration days",
-          value = NA,
-          min = 1,
-          step = 1
+    shiny::div(
+      class = "cgm-panel",
+      shiny::fluidRow(
+        shiny::column(
+          2,
+          shiny::numericInput(ns("tir_lower"), "TIR lower", value = 70, min = 1)
+        ),
+        shiny::column(
+          2,
+          shiny::numericInput(
+            ns("tir_upper"),
+            "TIR upper",
+            value = 180,
+            min = 1
+          )
+        ),
+        shiny::column(
+          2,
+          shiny::numericInput(
+            ns("tbr_level2"),
+            "TBR level 2",
+            value = 54,
+            min = 1
+          )
+        ),
+        shiny::column(
+          2,
+          shiny::numericInput(
+            ns("tar_level2"),
+            "TAR level 2",
+            value = 250,
+            min = 1
+          )
+        ),
+        shiny::column(
+          2,
+          shiny::numericInput(
+            ns("valid_day_hours"),
+            "Valid day hours",
+            value = 14,
+            min = 1,
+            max = 24
+          )
+        )
+      ),
+      shiny::fluidRow(
+        shiny::column(4, shiny::uiOutput(ns("analysis_date_range_ui"))),
+        shiny::column(
+          3,
+          shiny::numericInput(
+            ns("expected_study_duration_days"),
+            "Expected study duration days",
+            value = NA,
+            min = 1,
+            step = 1
+          )
         )
       )
-    ),
+    )
+  )
+}
+
+preprocessing_imputation_ui <- function(id) {
+  ns <- shiny::NS(id)
+  shiny::tagList(
+    shiny::h3("Imputation"),
     shiny::div(
       id = ns("imputation_panel"),
-      class = "card mb-3",
-      style = "padding: 14px 16px;",
-      shiny::h4("Imputation"),
+      class = "cgm-panel mb-3",
       shiny::uiOutput(ns("imputation_summary")),
       shiny::fluidRow(
         shiny::column(
@@ -64,11 +115,7 @@ imputation_options_ui <- function(selected_method = "none", ns = identity) {
             "LightGBM" = "lightgbm"
           ),
           selected = "auto"
-        )
-      ),
-      shiny::column(
-        2,
-        shiny::br(),
+        ),
         shiny::actionButton(
           ns("run_imputation"),
           label = "Run imputation",
@@ -80,11 +127,17 @@ imputation_options_ui <- function(selected_method = "none", ns = identity) {
   )
 }
 
-normalize_imputation_integer_vector <- function(x, default, length_required = NULL) {
+normalize_imputation_integer_vector <- function(
+  x,
+  default,
+  length_required = NULL
+) {
   if (is.null(x) || !nzchar(trimws(as.character(x)))) {
     return(default)
   }
-  values <- suppressWarnings(as.integer(strsplit(as.character(x), "[, ]+")[[1L]]))
+  values <- suppressWarnings(as.integer(strsplit(as.character(x), "[, ]+")[[
+    1L
+  ]]))
   values <- values[!is.na(values)]
   if (!length(values)) {
     return(default)
@@ -108,14 +161,15 @@ imputation_run_status_ui <- function(status, selected_method = "none") {
   }
   status <- status %||% list(state = "not_run")
   state <- status$state %||% "not_run"
-  message <- status$message %||% switch(
-    state,
-    running = "Imputation is running. Analysis tabs continue to use the current non-imputed data until it completes.",
-    complete = "Imputation is complete. Analysis tabs are using the imputed dataset.",
-    stale = "Imputation settings changed. Analysis tabs are using the previous non-imputed or cached data until imputation is run again.",
-    failed = "Imputation failed. Analysis tabs are using the non-imputed dataset.",
-    "Imputation has not been run for the current dataset. Analysis tabs are using non-imputed data."
-  )
+  message <- status$message %||%
+    switch(
+      state,
+      running = "Imputation is running. Analysis tabs continue to use the current non-imputed data until it completes.",
+      complete = "Imputation is complete. Analysis tabs are using the imputed dataset.",
+      stale = "Imputation settings changed. Analysis tabs are using the previous non-imputed or cached data until imputation is run again.",
+      failed = "Imputation failed. Analysis tabs are using the non-imputed dataset.",
+      "Imputation has not been run for the current dataset. Analysis tabs are using non-imputed data."
+    )
   class <- switch(
     state,
     running = "alert alert-info",
@@ -124,7 +178,11 @@ imputation_run_status_ui <- function(status, selected_method = "none") {
     failed = "alert alert-danger",
     "alert alert-light border"
   )
-  shiny::div(class = class, style = "margin-top: 10px; margin-bottom: 0;", message)
+  shiny::div(
+    class = class,
+    style = "margin-top: 10px; margin-bottom: 0;",
+    message
+  )
 }
 
 preprocessing_module_server <- function(id, mapping, standardized) {
@@ -137,7 +195,10 @@ preprocessing_module_server <- function(id, mapping, standardized) {
     output$analysis_date_range_ui <- shiny::renderUI({
       range <- available_analysis_date_range(standardized())
       if (is.na(range[["start"]]) || is.na(range[["end"]])) {
-        return(shiny::dateRangeInput(session$ns("analysis_date_range"), "Analysis date range"))
+        return(shiny::dateRangeInput(
+          session$ns("analysis_date_range"),
+          "Analysis date range"
+        ))
       }
       shiny::dateRangeInput(
         session$ns("analysis_date_range"),
@@ -150,12 +211,23 @@ preprocessing_module_server <- function(id, mapping, standardized) {
     })
 
     output$imputation_summary <- shiny::renderUI({
-      data <- tryCatch({
-        date_range <- normalize_analysis_date_range(input$analysis_date_range, standardized())
-        filter_analysis_date_range(standardized(), date_range)
-      }, shiny.silent.error = function(error) NULL, error = function(error) NULL)
+      data <- tryCatch(
+        {
+          date_range <- normalize_analysis_date_range(
+            input$analysis_date_range,
+            standardized()
+          )
+          filter_analysis_date_range(standardized(), date_range)
+        },
+        shiny.silent.error = function(error) NULL,
+        error = function(error) NULL
+      )
       interval_minutes <- input$imputation_interval_minutes %||% 5L
-      precomputed <- if (is.data.frame(data) && nrow(data) && all(c("id", "timestamp", "glucose") %in% names(data))) {
+      precomputed <- if (
+        is.data.frame(data) &&
+          nrow(data) &&
+          all(c("id", "timestamp", "glucose") %in% names(data))
+      ) {
         tryCatch(
           cgm_timed(
             "data_imputation_summary_precompute",
@@ -182,7 +254,10 @@ preprocessing_module_server <- function(id, mapping, standardized) {
     })
 
     output$imputation_run_status <- shiny::renderUI({
-      imputation_run_status_ui(imputation_status(), input$imputation %||% "none")
+      imputation_run_status_ui(
+        imputation_status(),
+        input$imputation %||% "none"
+      )
     })
 
     settings <- shiny::reactive({
@@ -192,8 +267,13 @@ preprocessing_module_server <- function(id, mapping, standardized) {
         tir_upper = input$tir_upper,
         tar_level2 = input$tar_level2
       )
-      date_range <- normalize_analysis_date_range(input$analysis_date_range, standardized())
-      expected_duration_days <- normalize_expected_study_duration_days(input$expected_study_duration_days)
+      date_range <- normalize_analysis_date_range(
+        input$analysis_date_range,
+        standardized()
+      )
+      expected_duration_days <- normalize_expected_study_duration_days(
+        input$expected_study_duration_days
+      )
 
       create_reproducibility_settings(
         column_mapping = mapping(),
@@ -224,7 +304,9 @@ preprocessing_module_server <- function(id, mapping, standardized) {
         selected_metrics = "core"
       )
     })
-    attr(settings, "imputation_run") <- shiny::reactive(input$run_imputation %||% 0L)
+    attr(settings, "imputation_run") <- shiny::reactive(
+      input$run_imputation %||% 0L
+    )
     attr(settings, "imputation_status") <- shiny::reactive(imputation_status())
     attr(settings, "set_imputation_status") <- function(status) {
       imputation_status(status)

@@ -495,17 +495,6 @@ combine_uploaded_files <- function(datapaths, filenames, header_rows = NULL, fir
   combined
 }
 
-#' Load bundled complete example CGM data
-#'
-#' @return A data frame with complete example CGM readings.
-#' @noRd
-load_example_complete_cgm_data <- function() {
-  load_extdata_csv(
-    "cgm_example_complete.csv",
-    "Complete example CGM data file was not found."
-  )
-}
-
 load_extdata_csv <- function(filename, missing_message) {
   demo_path <- system.file("extdata", filename, package = "CGMAnalyzerShiny")
   if (!nzchar(demo_path)) {

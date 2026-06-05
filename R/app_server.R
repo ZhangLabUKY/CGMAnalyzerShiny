@@ -1,3 +1,5 @@
+options(shiny.maxRequestSize = 1024^3)
+
 app_server <- function(input, output, session) {
   session$onSessionEnded(function() {
     cleanup_background_workers()
@@ -46,8 +48,16 @@ app_server <- function(input, output, session) {
   })
 
   output$data_setup_status <- shiny::renderUI({
-    upload <- tryCatch(uploaded(), shiny.silent.error = function(error) NULL, error = function(error) NULL)
-    map <- tryCatch(mapping(), shiny.silent.error = function(error) NULL, error = function(error) NULL)
+    upload <- tryCatch(
+      uploaded(),
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
+    )
+    map <- tryCatch(
+      mapping(),
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
+    )
     standardized_result <- safe_standardized()
     data_validation_panel_ui(
       upload = upload,
@@ -57,21 +67,33 @@ app_server <- function(input, output, session) {
     )
   })
 
-  output$data_summary <- shiny::renderUI({
-    upload <- tryCatch(uploaded(), shiny.silent.error = function(error) NULL, error = function(error) NULL)
+  output$data_status_strip <- shiny::renderUI({
+    upload <- tryCatch(
+      uploaded(),
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
+    )
+    map <- tryCatch(
+      mapping(),
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
+    )
     standardized_result <- safe_standardized()
-    summary <- data_upload_summary(upload, standardized_result$data)
-    if (!nrow(summary)) {
-      return(NULL)
-    }
-    shiny::tagList(
-      shiny::h4("Data Summary"),
-      summary_card_ui(summary)
+    data_status_strip_ui(
+      upload = upload,
+      mapping = map,
+      standardized_data = standardized_result$data,
+      standardization_error = standardized_result$error,
+      settings = safe_settings()
     )
   })
 
   output$data_upload_hint <- shiny::renderUI({
-    upload <- tryCatch(uploaded(), shiny.silent.error = function(error) NULL, error = function(error) NULL)
+    upload <- tryCatch(
+      uploaded(),
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
+    )
     if (has_uploaded_data(upload)) {
       return(NULL)
     }
@@ -83,35 +105,68 @@ app_server <- function(input, output, session) {
   })
 
   output$data_mapping_ui <- shiny::renderUI({
-    upload <- tryCatch(uploaded(), shiny.silent.error = function(error) NULL, error = function(error) NULL)
+    upload <- tryCatch(
+      uploaded(),
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
+    )
     if (!has_uploaded_data(upload)) {
       return(NULL)
     }
     column_mapping_module_ui("column_mapping")
   })
 
-  output$data_workflow_ui <- shiny::renderUI({
-    upload <- tryCatch(uploaded(), shiny.silent.error = function(error) NULL, error = function(error) NULL)
+  output$data_preprocessing_settings_ui <- shiny::renderUI({
+    upload <- tryCatch(
+      uploaded(),
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
+    )
     if (!has_uploaded_data(upload)) {
       return(NULL)
     }
-    map <- tryCatch(mapping(), shiny.silent.error = function(error) NULL, error = function(error) NULL)
-    preview_ui <- if (required_preview_mappings_selected(map)) {
-      upload_preview_ui("upload")
-    } else {
-      shiny::div(
-        class = "alert alert-light border",
-        "Select Timestamp and Glucose columns to show the data preview."
-      )
-    }
-    shiny::tagList(
-      shiny::hr(),
-      preprocessing_module_ui("preprocessing"),
-      shiny::uiOutput("data_setup_status"),
-      shiny::uiOutput("data_summary"),
-      shiny::hr(),
-      preview_ui
+    preprocessing_settings_ui("preprocessing")
+  })
+
+  output$data_imputation_ui <- shiny::renderUI({
+    upload <- tryCatch(
+      uploaded(),
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
     )
+    if (!has_uploaded_data(upload)) {
+      return(shiny::div(
+        class = "alert alert-light border",
+        "Upload CGM files or load example data to review imputation."
+      ))
+    }
+    preprocessing_imputation_ui("preprocessing")
+  })
+
+  output$data_preview_ui <- shiny::renderUI({
+    upload <- tryCatch(
+      uploaded(),
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
+    )
+    if (!has_uploaded_data(upload)) {
+      return(shiny::div(
+        class = "alert alert-light border cgm-data-preview-placeholder",
+        "Upload CGM files or load example data to show the data preview."
+      ))
+    }
+    map <- tryCatch(
+      mapping(),
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
+    )
+    if (!required_preview_mappings_selected(map)) {
+      return(shiny::div(
+        class = "alert alert-light border cgm-data-preview-placeholder",
+        "Select Timestamp and Glucose columns to show the data preview."
+      ))
+    }
+    upload_preview_ui("upload")
   })
 
   analysis_input <- shiny::bindCache(shiny::reactive({
