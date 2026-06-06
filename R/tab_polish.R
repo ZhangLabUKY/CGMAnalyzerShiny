@@ -262,6 +262,7 @@ timestamp_summary_display <- function(summary) {
       "Parsed timestamps",
       "Invalid timestamps",
       "Ambiguous date values",
+      "Date-only values",
       "Date span"
     ),
     Value = c(
@@ -269,6 +270,7 @@ timestamp_summary_display <- function(summary) {
       format_count(summary$parsed_timestamps),
       format_count(summary$failed_timestamps),
       format_count(summary$ambiguous_timestamps),
+      format_count(summary$date_only_timestamps %||% 0L),
       if (is.na(summary$first_timestamp)) {
         "Not available"
       } else {
@@ -331,6 +333,17 @@ data_validation_warnings <- function(
       paste0(
         "Timestamp parsing needs review. Example value(s): ",
         timestamp_summary$example_failed_values
+      )
+    )
+  }
+  if (
+    !is.null(timestamp_summary) &&
+      (timestamp_summary$date_only_timestamps %||% 0L) > 0L
+  ) {
+    warnings <- c(
+      warnings,
+      paste0(
+        "Date-only timestamp values were parsed at midnight. Confirm the selected timestamp column includes clock time when time-of-day analysis is needed."
       )
     )
   }

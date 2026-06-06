@@ -64,6 +64,28 @@ test_that("timestamp validation summary reports parsed, invalid, and ambiguous v
   expect_true(any(grepl("day-first", warnings, fixed = TRUE)))
 })
 
+test_that("timestamp validation summary reports date-only parsed values", {
+  upload <- list(
+    data = data.frame(
+      time = c("2020-12-25", "2019-12-29", "2019-11-18"),
+      glucose = c(100, 110, 120),
+      stringsAsFactors = FALSE
+    ),
+    files = "sample.csv"
+  )
+  mapping <- list(timestamp = "time", glucose = "glucose")
+
+  summary <- timestamp_validation_summary(upload, mapping)
+  display <- timestamp_summary_display(summary)
+  warnings <- data_validation_warnings(summary, NULL)
+
+  expect_equal(summary$parsed_timestamps, 3)
+  expect_equal(summary$failed_timestamps, 0)
+  expect_equal(summary$date_only_timestamps, 3)
+  expect_equal(display$Value[display$Label == "Date-only values"], "3")
+  expect_true(any(grepl("parsed at midnight", warnings, fixed = TRUE)))
+})
+
 test_that("glucose validation summary reports parsing and review warnings", {
   upload <- list(data = data.frame(glucose = c("100", "", "abc", "401")), files = "sample.csv")
   mapping <- list(timestamp = "time", glucose = "glucose", source_units = "mg/dL")
@@ -239,6 +261,25 @@ test_that("plots module UI renders dashboard visual section without tabsets", {
   expect_true(grepl("cgm-plots-summary", html, fixed = TRUE))
   expect_true(grepl("cgm-plot-panel", html, fixed = TRUE))
   expect_false(grepl("<style", html, fixed = TRUE))
+  expect_false(grepl("tabset", html, ignore.case = TRUE))
+  expect_false(grepl("nav-tabs", html, fixed = TRUE))
+})
+
+test_that("statistics module UI renders dashboard sections without tabsets", {
+  html <- paste(as.character(stats_module_ui("stats")), collapse = "\n")
+
+  expect_true(grepl("cgm-statistics-dashboard", html, fixed = TRUE))
+  expect_true(grepl("cgm-statistics-overview", html, fixed = TRUE))
+  expect_true(grepl("cgm-statistics-filter-bar", html, fixed = TRUE))
+  expect_true(grepl("cgm-statistics-results-grid", html, fixed = TRUE))
+  expect_true(grepl("stats-metric", html, fixed = TRUE))
+  expect_true(grepl("stats-grouping", html, fixed = TRUE))
+  expect_true(grepl("stats-period_filter", html, fixed = TRUE))
+  expect_true(grepl("stats-test_type", html, fixed = TRUE))
+  expect_true(grepl("stats-stats_status_note", html, fixed = TRUE))
+  expect_true(grepl("stats-group_summary", html, fixed = TRUE))
+  expect_true(grepl("stats-test_result_summary", html, fixed = TRUE))
+  expect_true(grepl("stats-test_result", html, fixed = TRUE))
   expect_false(grepl("tabset", html, ignore.case = TRUE))
   expect_false(grepl("nav-tabs", html, fixed = TRUE))
 })

@@ -5396,7 +5396,7 @@
       "checksum": "bd81423b0e8092952e18625fcd943c72"
     },
     "inst/www/cgm-theme.css": {
-      "checksum": "dc178bb18886ea7596e08d1b12151732"
+      "checksum": "091d2395bd609ccffbf55eca45300294"
     },
     "LICENSE.md": {
       "checksum": "3d82780e8917b360cbee7b9ec3e40734"
@@ -5432,7 +5432,7 @@
       "checksum": "5807536e35927589f122acd7c3565fd0"
     },
     "R/data_standardization.R": {
-      "checksum": "dee76f3170ea512d2054dc064b6c9b89"
+      "checksum": "b20d77ed454c6851655ee576ef88442a"
     },
     "R/filter_choices.R": {
       "checksum": "159524c557a460a2f81c91d507c70e8d"
@@ -5450,7 +5450,7 @@
       "checksum": "a20f64e6101d0304830e3f84d3037717"
     },
     "R/metrics.R": {
-      "checksum": "8b309f4becfd86f72e6a49025c9ef52f"
+      "checksum": "e73609339c184b773c021340019b8e22"
     },
     "R/missingness.R": {
       "checksum": "9359924f82c09ed83c7e373a5ca366d3"
@@ -5477,7 +5477,7 @@
       "checksum": "715b1c1ecaef5a04bb521e4b466ba0fb"
     },
     "R/module_stats.R": {
-      "checksum": "f8cebffcb1a1a640fad661489a5839c8"
+      "checksum": "ee1e95721349f684de0de49378c6ab6b"
     },
     "R/module_upload.R": {
       "checksum": "53c4283f3f486a87302a0326b570fdbf"
@@ -5498,13 +5498,13 @@
       "checksum": "439e45ce7c1ee85565403c2935b36cc8"
     },
     "R/statistics.R": {
-      "checksum": "b4636a40bc0e48a85482e024463b65b6"
+      "checksum": "11d07ed2e7c616233b1b74a54940e421"
     },
     "R/subject_id.R": {
       "checksum": "6a41347915f6b2f6add68304f60ae3c8"
     },
     "R/tab_polish.R": {
-      "checksum": "4560c748394f302c5675a0d3b4973120"
+      "checksum": "b6dd22ebb4229dc6e20bbd3cc4f9ce5d"
     },
     "R/tab_state.R": {
       "checksum": "9beb7b1a7bc7b9f1ba6417ce9b8677ad"
@@ -5576,13 +5576,13 @@
       "checksum": "422454638733aed9e3973621b8ce6263"
     },
     "tests/testthat/test-standardization.R": {
-      "checksum": "9ff268193b61f1a0da3b2edff5c53d62"
+      "checksum": "413b1a9c0fb0abf2942d15cce2a88fc5"
     },
     "tests/testthat/test-statistics.R": {
-      "checksum": "ad3a9e044d777876dd18b242b6eb387a"
+      "checksum": "ef3aba878259994050aa3f5044c3f191"
     },
     "tests/testthat/test-tab-polish.R": {
-      "checksum": "35380dfc30e0bf47cb6bc3062b1cb5ae"
+      "checksum": "0e79a5f15c0ada9daa5868701f13de47"
     },
     "tests/testthat/test-time-windows.R": {
       "checksum": "1e63418b4fa94b9597c1de2491d37fb0"
@@ -5591,7 +5591,7 @@
       "checksum": "9acc75b3d60af56700a45f876d7ac1e6"
     },
     "www/cgm-theme.css": {
-      "checksum": "dc178bb18886ea7596e08d1b12151732"
+      "checksum": "091d2395bd609ccffbf55eca45300294"
     }
   },
   "users": null

@@ -3,6 +3,77 @@ default_metric_groups <- function(data) {
   groups[groups %in% names(data)]
 }
 
+metric_source_columns <- function() {
+  c(
+    "id",
+    "id_source",
+    "timestamp",
+    "glucose",
+    "units",
+    "device",
+    "source_file",
+    "imputed_flag",
+    "metric_period"
+  )
+}
+
+subject_metric_metadata <- function(data) {
+  if (!is.data.frame(data) || !"id" %in% names(data) || !nrow(data)) {
+    return(data.frame(id = character(), stringsAsFactors = FALSE))
+  }
+
+  ids <- unique(as.character(data$id))
+  out <- data.frame(id = ids, stringsAsFactors = FALSE)
+  metadata_cols <- setdiff(names(data), metric_source_columns())
+  if (!length(metadata_cols)) {
+    return(out)
+  }
+
+  for (col in metadata_cols) {
+    values <- data.frame(
+      id = as.character(data$id),
+      value = trimws(as.character(data[[col]])),
+      stringsAsFactors = FALSE
+    )
+    values$value[is.na(values$value) | !nzchar(values$value)] <- NA_character_
+    split_values <- split(values$value, values$id, drop = TRUE)
+    unique_values <- lapply(split_values, function(x) unique(x[!is.na(x)]))
+    if (any(vapply(unique_values, length, integer(1)) > 1L)) {
+      next
+    }
+    lookup <- vapply(unique_values, function(x) {
+      if (length(x)) x[[1L]] else NA_character_
+    }, character(1))
+    out[[col]] <- unname(lookup[out$id])
+  }
+
+  out
+}
+
+attach_metric_subject_metadata <- function(metrics, data) {
+  if (!is.data.frame(metrics) || !nrow(metrics) || !"id" %in% names(metrics)) {
+    return(metrics)
+  }
+  metadata <- subject_metric_metadata(data)
+  metadata_cols <- setdiff(names(metadata), c("id", names(metrics)))
+  if (!nrow(metadata) || !length(metadata_cols)) {
+    return(metrics)
+  }
+
+  metrics$.metric_row_order <- seq_len(nrow(metrics))
+  out <- merge(
+    metrics,
+    metadata[, c("id", metadata_cols), drop = FALSE],
+    by = "id",
+    all.x = TRUE,
+    sort = FALSE
+  )
+  out <- out[order(out$.metric_row_order), , drop = FALSE]
+  out$.metric_row_order <- NULL
+  row.names(out) <- NULL
+  out
+}
+
 split_by_columns <- function(data, columns) {
   columns <- columns[columns %in% names(data)]
   key <- do.call(paste, c(data[columns], sep = "\r"))
@@ -122,6 +193,7 @@ compute_base_core_metrics <- function(
     out <- do.call(rbind, period_rows)
   }
   row.names(out) <- NULL
+  out <- attach_metric_subject_metadata(out, data)
   out$metric_engine <- "base_fallback"
   out
 }

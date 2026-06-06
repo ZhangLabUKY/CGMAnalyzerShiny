@@ -187,6 +187,14 @@ parse_cgm_timestamp <- function(x, tz = "UTC", date_order = "dmy") {
     idx = parseable_non_year_first
   )
 
+  parsed <- parse_with_formats(
+    x_chr,
+    parsed,
+    c("%Y-%m-%d", "%Y/%m/%d", timestamp_date_only_formats(date_order)),
+    tz = tz,
+    idx = detect_date_only_timestamps(x_chr)
+  )
+
   parsed
 }
 
@@ -234,6 +242,16 @@ timestamp_date_order_formats <- function(date_order = NULL) {
     "%d-%m-%y %H:%M:%S",
     "%d-%m-%y %H:%M"
   )
+  if (identical(date_order, "dmy")) {
+    c(dmy, mdy)
+  } else {
+    c(mdy, dmy)
+  }
+}
+
+timestamp_date_only_formats <- function(date_order = NULL) {
+  mdy <- c("%m/%d/%Y", "%m-%d-%Y", "%m/%d/%y", "%m-%d-%y")
+  dmy <- c("%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y")
   if (identical(date_order, "dmy")) {
     c(dmy, mdy)
   } else {
@@ -299,6 +317,7 @@ timestamp_parse_summary <- function(x, tz = "UTC", date_order = "dmy") {
     parsed_timestamps = sum(!is.na(parsed)),
     failed_timestamps = sum(non_missing & is.na(parsed)),
     ambiguous_timestamps = sum(detect_ambiguous_timestamps(x)),
+    date_only_timestamps = sum(detect_date_only_timestamps(x)),
     first_timestamp = if (any(!is.na(parsed))) {
       min(parsed, na.rm = TRUE)
     } else {
@@ -315,6 +334,21 @@ timestamp_parse_summary <- function(x, tz = "UTC", date_order = "dmy") {
 
 has_ambiguous_timestamps <- function(x) {
   any(detect_ambiguous_timestamps(x), na.rm = TRUE)
+}
+
+detect_date_only_timestamps <- function(x) {
+  x_chr <- trimws(as.character(x))
+  x_chr[x_chr == ""] <- NA_character_
+  out <- !is.na(x_chr) & (
+    grepl("^\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}$", x_chr) |
+      grepl("^\\d{1,2}[-/]\\d{1,2}[-/]\\d{2,4}$", x_chr)
+  )
+  out[is.na(out)] <- FALSE
+  out
+}
+
+has_date_only_timestamps <- function(x) {
+  any(detect_date_only_timestamps(x), na.rm = TRUE)
 }
 
 format_cgm_timestamp_iso <- function(timestamp, tz = "UTC") {

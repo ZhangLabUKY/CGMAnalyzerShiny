@@ -61,3 +61,82 @@ test_that("run_metric_stat_test filters period rows before testing", {
   expect_true(is.finite(default_result$`P-value`))
   expect_true(is.finite(daytime_result$`P-value`))
 })
+
+test_that("subject metadata attaches to metric rows without splitting calculations", {
+  data <- data.frame(
+    id = rep(c("S1", "S2"), each = 2),
+    id_source = "file",
+    timestamp = as.POSIXct(c(
+      "2026-05-05 08:00:00",
+      "2026-05-05 09:00:00",
+      "2026-05-05 08:00:00",
+      "2026-05-05 09:00:00"
+    ), tz = "UTC"),
+    glucose = c(100, 120, 140, 160),
+    group = rep(c("Control", "Treatment"), each = 2),
+    sex = rep(c("F", "M"), each = 2),
+    age = rep(c("42", "55"), each = 2),
+    stringsAsFactors = FALSE
+  )
+
+  metrics <- compute_base_core_metrics(data, periods = "full_day")
+
+  expect_equal(nrow(metrics), 2)
+  expect_equal(metrics$readings, c(2, 2))
+  expect_equal(metrics$sex, c("F", "M"))
+  expect_equal(metrics$age, c("42", "55"))
+})
+
+test_that("subject metadata that varies within a subject is omitted from metric rows", {
+  data <- data.frame(
+    id = c("S1", "S1", "S2", "S2"),
+    timestamp = as.POSIXct(c(
+      "2026-05-05 08:00:00",
+      "2026-05-05 09:00:00",
+      "2026-05-05 08:00:00",
+      "2026-05-05 09:00:00"
+    ), tz = "UTC"),
+    glucose = c(100, 120, 140, 160),
+    sex = c("F", "M", "M", "M"),
+    stringsAsFactors = FALSE
+  )
+
+  metrics <- compute_base_core_metrics(data, periods = "full_day")
+
+  expect_false("sex" %in% names(metrics))
+})
+
+test_that("grouping choices include two-level categorical metadata only", {
+  metrics <- synthetic_metric_data()
+  metrics$sex <- rep(c("F", "M"), each = 4)
+  metrics$custom_arm <- rep(c("A", "B"), each = 4)
+  metrics$age <- as.character(seq_len(nrow(metrics)) + 40)
+  metrics$site <- rep(c("A", "B", "C", "D"), length.out = nrow(metrics))
+  metrics$one_level <- "Only"
+  metrics$metric_period <- "full_day"
+
+  choices <- grouping_choices(metrics)
+
+  expect_true("group" %in% choices)
+  expect_true("sex" %in% choices)
+  expect_true("custom_arm" %in% choices)
+  expect_false("age" %in% choices)
+  expect_false("site" %in% choices)
+  expect_false("one_level" %in% choices)
+  expect_false("id" %in% choices)
+  expect_false("metric_period" %in% choices)
+  expect_false("mean_glucose" %in% choices)
+})
+
+test_that("summarize_metric_by_group reports readable descriptive statistics", {
+  summary <- summarize_metric_by_group(
+    synthetic_metric_data(),
+    metric = "mean_glucose",
+    grouping = "group"
+  )
+
+  expect_equal(summary$Group, c("Control", "Treatment"))
+  expect_equal(summary$N, c(4, 4))
+  expect_equal(summary$Mean, c(108.75, 144.25))
+  expect_true(all(c("Median", "IQR", "Minimum", "Maximum") %in% names(summary)))
+})

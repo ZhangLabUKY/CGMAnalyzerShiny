@@ -38,6 +38,36 @@ test_that("parse_cgm_timestamp handles year-first colon CGM timestamps", {
   ))
 })
 
+test_that("parse_cgm_timestamp handles date-only timestamps at midnight", {
+  parsed <- parse_cgm_timestamp(c("2020-12-25", "2019-12-29", "2019-11-18"))
+
+  expect_equal(format_cgm_timestamp_iso(parsed), c(
+    "2020-12-25T00:00:00",
+    "2019-12-29T00:00:00",
+    "2019-11-18T00:00:00"
+  ))
+  expect_true(all(detect_date_only_timestamps(c("2020-12-25", "2019-12-29", "2019-11-18"))))
+})
+
+test_that("parse_cgm_timestamp keeps ISO UTC timestamp parsing intact", {
+  parsed <- parse_cgm_timestamp(c(
+    "2020-05-11T00:06:17Z",
+    "2020-05-11T00:06:17.123Z",
+    "2020-05-11T00:06:17+0000"
+  ))
+
+  expect_equal(format_cgm_timestamp_iso(parsed), c(
+    "2020-05-11T00:06:17",
+    "2020-05-11T00:06:17",
+    "2020-05-11T00:06:17"
+  ))
+  expect_false(any(detect_date_only_timestamps(c(
+    "2020-05-11T00:06:17Z",
+    "2020-05-11T00:06:17.123Z",
+    "2020-05-11T00:06:17+0000"
+  ))))
+})
+
 test_that("ambiguous day and month timestamps default to day first", {
   raw <- data.frame(
     id = "A",
@@ -216,6 +246,28 @@ test_that("prepared CGM export uses canonical timestamp strings", {
 
   expect_type(exported$timestamp, "character")
   expect_equal(exported$timestamp, "2026-05-06T11:30:00")
+})
+
+test_that("standardize_cgm_data accepts date-only timestamp columns", {
+  raw <- data.frame(
+    id = c("A", "A", "A"),
+    timestamp = c("2020-12-25", "2019-12-29", "2019-11-18"),
+    glucose = c(100, 110, 120),
+    stringsAsFactors = FALSE
+  )
+
+  standardized <- standardize_cgm_data(
+    raw,
+    mapping = list(id = "id", timestamp = "timestamp", glucose = "glucose")
+  )
+  exported <- prepare_cgm_data_export(standardized)
+
+  expect_false(any(is.na(standardized$timestamp)))
+  expect_equal(exported$timestamp, c(
+    "2019-11-18T00:00:00",
+    "2019-12-29T00:00:00",
+    "2020-12-25T00:00:00"
+  ))
 })
 
 test_that("read_cgm_file adds source file and filename-derived source id", {
