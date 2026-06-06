@@ -31,10 +31,17 @@ test_that("export payload helpers produce user-facing data products", {
   expect_true(all(grepl("^2026-05-0[56]T", data_export$timestamp)))
   expect_true("imputed_flag" %in% names(data_export))
 
-  expect_true(all(c("Subject ID", "Metric", "Value", "Units", "Definition") %in% names(metric_export)))
+  expect_true(all(
+    c("Subject ID", "Period", "Metric", "Value", "Units", "Definition") %in%
+      names(metric_export)
+  ))
   expect_false("metric_engine" %in% names(metric_export))
   expect_true("Mean glucose" %in% metric_export$Metric)
+  expect_true("All" %in% metric_export$Period)
 
-  expect_true(all(c("Subject ID", "QC status", "Review notes", "Missing glucose") %in% names(qc_export)))
+  expect_true(all(
+    c("Subject ID", "QC status", "Review notes", "Missing glucose") %in%
+      names(qc_export)
+  ))
   expect_false(any(grepl("_", names(qc_export), fixed = TRUE)))
 })

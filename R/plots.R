@@ -102,20 +102,28 @@ create_trace_plot <- function(
   data,
   thresholds = default_cgm_thresholds(),
   participant_id = NULL,
+  time_window = default_time_window(),
   max_points_per_participant = Inf
 ) {
   if (!is.null(participant_id) && nzchar(participant_id)) {
     data <- data[data$id == participant_id, , drop = FALSE]
   }
+  time_window <- normalize_time_window(time_window)
+  data <- filter_time_window_data(data, time_window)
   data <- data[is_finite_cgm_timestamp(data$timestamp) & !is.na(data$glucose), , drop = FALSE]
   data <- prepare_plot_display_data(data, max_points_per_participant = max_points_per_participant)
   if (!nrow(data)) {
     return(empty_plot(plot_empty_message("trace")))
   }
   data <- ensure_plot_imputed_flag(data)
+  data$plot_group <- if (identical(time_window, "full_day")) {
+    as.character(data$id)
+  } else {
+    interaction(data$id, as.Date(data$timestamp), drop = TRUE, lex.order = TRUE)
+  }
   data$Tooltip <- trace_hover_text(data)
 
-  ggplot2::ggplot(data, ggplot2::aes(x = timestamp, y = glucose, color = id, group = id, text = Tooltip)) +
+  ggplot2::ggplot(data, ggplot2::aes(x = timestamp, y = glucose, color = id, group = plot_group, text = Tooltip)) +
     ggplot2::geom_line(alpha = 0.8, linewidth = 0.35, na.rm = TRUE) +
     suppressWarnings(ggplot2::geom_point(
       data = data[data$imputed_flag %in% TRUE, , drop = FALSE],
@@ -277,10 +285,11 @@ preserve_plot_day_selection <- function(selected, choices, previous = all_filter
   choice_values[choice_values %in% selected & choice_values != all_filter_value()]
 }
 
-filter_plot_data <- function(data, participant = "", group = "", day = "") {
+filter_plot_data <- function(data, participant = "", group = "", day = "", time_window = default_time_window()) {
   participant <- normalize_filter_value(participant)
   group <- normalize_filter_value(group)
   day <- normalize_plot_days(day)
+  time_window <- normalize_time_window(time_window)
 
   if (nzchar(participant)) {
     data <- data[data$id == participant, , drop = FALSE]
@@ -291,16 +300,16 @@ filter_plot_data <- function(data, participant = "", group = "", day = "") {
   if (!identical(day, all_filter_value())) {
     data <- data[as.character(as.Date(data$timestamp)) %in% day, , drop = FALSE]
   }
-  data
+  filter_time_window_data(data, time_window)
 }
 
-available_plot_days <- function(data, participant = "", group = "") {
-  data <- filter_plot_data(data, participant = participant, group = group)
+available_plot_days <- function(data, participant = "", group = "", time_window = default_time_window()) {
+  data <- filter_plot_data(data, participant = participant, group = group, time_window = time_window)
   sort(unique(as.character(as.Date(data$timestamp[!is.na(data$timestamp)]))))
 }
 
-plot_day_filter_choices <- function(data, participant = "", group = "") {
-  filter_select_choices(available_plot_days(data, participant = participant, group = group), all_label = "All days")
+plot_day_filter_choices <- function(data, participant = "", group = "", time_window = default_time_window()) {
+  filter_select_choices(available_plot_days(data, participant = participant, group = group, time_window = time_window), all_label = "All days")
 }
 
 is_finite_cgm_timestamp <- function(timestamp) {
@@ -328,14 +337,16 @@ plot_filtered_data <- function(
   plot_type = "trace",
   participant = "",
   group = "",
-  day = ""
+  day = "",
+  time_window = default_time_window()
 ) {
   day <- if (identical(plot_type, "daily_overlay")) normalize_plot_days(day) else all_filter_value()
   filtered <- filter_plot_data(
     data,
     participant = participant,
     group = group,
-    day = day
+    day = day,
+    time_window = time_window
   )
   filtered[is_finite_cgm_timestamp(filtered$timestamp), , drop = FALSE]
 }
@@ -451,14 +462,16 @@ plot_download_filename <- function(
   plot_type = "trace",
   participant = "",
   group = "",
-  day = ""
+  day = "",
+  time_window = default_time_window()
 ) {
   filtered <- plot_filtered_data(
     data,
     plot_type = plot_type,
     participant = participant,
     group = group,
-    day = day
+    day = day,
+    time_window = time_window
   )
   date_span <- if (nrow(filtered)) {
     paste0("dates-", sanitize_plot_filename_part(format_date_span(filtered$timestamp)))
@@ -470,6 +483,7 @@ plot_download_filename <- function(
     plot_type_filename_label(plot_type),
     plot_subject_filename_label(participant),
     plot_optional_filter_filename_label("group", group),
+    time_window_filename_label(time_window),
     if (identical(plot_type, "daily_overlay")) plot_day_filename_label(day) else date_span
   )
   paste0(paste(parts[nzchar(parts)], collapse = "_"), ".png")
@@ -489,9 +503,10 @@ prepare_time_of_day_plot_data <- function(
   participant = "",
   group = "",
   day = "",
+  time_window = default_time_window(),
   max_points_per_participant = Inf
 ) {
-  data <- filter_plot_data(data, participant = participant, group = group, day = day)
+  data <- filter_plot_data(data, participant = participant, group = group, day = day, time_window = time_window)
   data <- data[is_finite_cgm_timestamp(data$timestamp), , drop = FALSE]
   data <- prepare_plot_display_data(data, max_points_per_participant = max_points_per_participant)
   data <- ensure_plot_imputed_flag(data)
@@ -542,6 +557,7 @@ create_daily_overlay_plot <- function(
   participant = "",
   group = "",
   day = "",
+  time_window = default_time_window(),
   max_points_per_participant = Inf,
   date_legend_limit = daily_overlay_date_legend_limit()
 ) {
@@ -551,6 +567,7 @@ create_daily_overlay_plot <- function(
     participant = participant,
     group = group,
     day = day,
+    time_window = time_window,
     max_points_per_participant = max_points_per_participant
   )
   if (!nrow(plot_data)) {
@@ -588,9 +605,10 @@ prepare_agp_summary_data <- function(
   data,
   participant = "",
   group = "",
+  time_window = default_time_window(),
   bin_minutes = 30
 ) {
-  plot_data <- prepare_time_of_day_plot_data(data, participant = participant, group = group)
+  plot_data <- prepare_time_of_day_plot_data(data, participant = participant, group = group, time_window = time_window)
   plot_data <- plot_data[!is.na(plot_data$glucose) & !is.na(plot_data$time_minutes), , drop = FALSE]
   if (!nrow(plot_data)) {
     return(data.frame())
@@ -628,12 +646,14 @@ create_agp_summary_plot <- function(
   thresholds = default_cgm_thresholds(),
   participant = "",
   group = "",
+  time_window = default_time_window(),
   bin_minutes = 30
 ) {
   agp <- prepare_agp_summary_data(
     data,
     participant = participant,
     group = group,
+    time_window = time_window,
     bin_minutes = bin_minutes
   )
   if (!nrow(agp)) {
@@ -709,6 +729,7 @@ create_agp_summary_plot <- function(
 }
 
 tir_long_data <- function(metrics) {
+  metrics <- filter_metrics_by_period(metrics, default_time_window())
   if (!nrow(metrics)) {
     return(data.frame())
   }

@@ -1,8 +1,8 @@
 plot_filter_layout_order <- function(plot_type = "trace") {
   if (identical(plot_type, "daily_overlay")) {
-    c("day_filter", "subject_filter", "group_filter")
+    c("time_window_filter", "day_filter", "subject_filter", "group_filter")
   } else {
-    c("subject_filter", "group_filter")
+    c("time_window_filter", "subject_filter", "group_filter")
   }
 }
 
@@ -124,6 +124,21 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
       )
     })
 
+    output$time_window_filter <- shiny::renderUI({
+      req_active_tab(active_tab, "plots")
+      choices <- time_window_filter_choices()
+      shiny::selectInput(
+        session$ns("time_window"),
+        "Time window",
+        choices = choices,
+        selected = preserve_filter_selection(input$time_window %||% default_time_window(), choices)
+      )
+    })
+
+    normalized_time_window <- shiny::reactive({
+      normalize_time_window(input$time_window %||% default_time_window())
+    })
+
     day_choices <- shiny::reactive({
       req_active_tab(active_tab, "plots")
       if (!identical(input$plot_type, "daily_overlay")) {
@@ -132,7 +147,8 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
       plot_day_filter_choices(
         standardized(),
         participant = input$participant,
-        group = input$group
+        group = input$group,
+        time_window = normalized_time_window()
       )
     })
 
@@ -187,7 +203,8 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
           plot_type = plot_type,
           participant = input$participant,
           group = input$group,
-          day = normalized_day()
+          day = normalized_day(),
+          time_window = normalized_time_window()
         ),
         context = list(plot_type = plot_type)
       )
@@ -237,6 +254,7 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
             participant = input$participant,
             group = input$group,
             day = normalized_day(),
+            time_window = normalized_time_window(),
             displayed_rows = display_context$displayed_rows
           ),
           compact = TRUE
@@ -263,6 +281,7 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
             participant = input$participant,
             group = input$group,
             day = normalized_day(),
+            time_window = normalized_time_window(),
             max_points_per_participant = display_context$max_points_per_participant
           )
         ))
@@ -274,7 +293,8 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
             standardized(),
             thresholds = thresholds,
             participant = input$participant,
-            group = input$group
+            group = input$group,
+            time_window = normalized_time_window()
           )
         ))
       }
@@ -284,7 +304,8 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
         filter_plot_data(
           standardized(),
           participant = input$participant,
-          group = input$group
+          group = input$group,
+          time_window = normalized_time_window()
         )
       )
       cgm_timed(
@@ -292,6 +313,7 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
         create_trace_plot(
           data,
           thresholds = thresholds,
+          time_window = normalized_time_window(),
           max_points_per_participant = display_context$max_points_per_participant
         ),
         rows = nrow(data)
@@ -302,6 +324,7 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
     input$plot_type,
     input$participant,
     input$group,
+    normalized_time_window(),
     plot_day_cache_key(normalized_day()),
     adaptive_plot_target_points(),
     cache = "session"
@@ -322,7 +345,8 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
           plot_type = input$plot_type %||% "trace",
           participant = input$participant,
           group = input$group,
-          day = normalized_day()
+          day = normalized_day(),
+          time_window = normalized_time_window()
         )
       },
       content = function(file) {

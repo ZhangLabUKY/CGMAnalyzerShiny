@@ -40,10 +40,12 @@ insufficient_stat_result <- function(metric, grouping, test_type, groups = NA_ch
 #' @param metric Raw metric column name.
 #' @param grouping Grouping column name.
 #' @param test_type Either `welch_t` or `wilcoxon`.
+#' @param period Metric period to test when period-specific rows are present.
 #'
 #' @return One-row data frame with test result or an insufficiency note.
 #' @noRd
-run_metric_stat_test <- function(metrics, metric, grouping = "group", test_type = "welch_t") {
+run_metric_stat_test <- function(metrics, metric, grouping = "group", test_type = "welch_t", period = default_time_window()) {
+  metrics <- filter_metrics_by_period(metrics, period)
   if (!metric %in% names(metrics)) {
     stop("Selected metric is not available.", call. = FALSE)
   }

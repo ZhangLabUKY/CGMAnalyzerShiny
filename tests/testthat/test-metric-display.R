@@ -3,20 +3,52 @@ test_that("prepare_metrics_display hides internal adapter columns", {
   metrics <- compute_core_metrics(demo)
   display <- prepare_metrics_display(metrics)
 
-  expect_false(any(c("metric_engine", "cgmanalyzer_status", "iglu_status") %in% names(display)))
-  expect_false(any(grepl("CGManalyzer|iglu|engine|status", names(display), ignore.case = TRUE)))
-  expect_false(any(grepl("CGManalyzer|iglu|engine|status", unlist(display), ignore.case = TRUE)))
+  expect_false(any(
+    c("metric_engine", "cgmanalyzer_status", "iglu_status") %in% names(display)
+  ))
+  expect_false(any(grepl(
+    "CGManalyzer|iglu|engine|status",
+    names(display),
+    ignore.case = TRUE
+  )))
+  expect_false(any(grepl(
+    "CGManalyzer|iglu|engine|status",
+    unlist(display),
+    ignore.case = TRUE
+  )))
 })
 
 test_that("prepare_metrics_display returns readable long-format rows", {
   demo <- example_missing_5pct_standardized()
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
-  expect_true(all(c("Subject ID", "Category", "Metric", "Definition", "Value", "Units") %in% names(display)))
+  expect_true(all(
+    c(
+      "Subject ID",
+      "Period",
+      "Category",
+      "Metric",
+      "Definition",
+      "Value",
+      "Units"
+    ) %in%
+      names(display)
+  ))
   expect_false("Group" %in% names(display))
   expect_false("Visit" %in% names(display))
   expect_true(nrow(display) > 20)
-  expect_true(all(c("Data Coverage", "Central Tendency", "Variability", "Time in Range", "Detailed Range Bands", "Risk", "Excursions") %in% display$Category))
+  expect_true(all(
+    c(
+      "Data Coverage",
+      "Central Tendency",
+      "Variability",
+      "Time in Range",
+      "Detailed Range Bands",
+      "Risk",
+      "Excursions"
+    ) %in%
+      display$Category
+  ))
   expect_true("Mean glucose" %in% display$Metric)
   expect_true("Coefficient of variation" %in% display$Metric)
   expect_false(any(is.na(display$Definition) | !nzchar(display$Definition)))
@@ -27,7 +59,10 @@ test_that("metric display avoids wide debug columns on demo metrics", {
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
   expect_lte(ncol(display), 8)
-  expect_equal(sort(unique(display[["Subject ID"]])), sort(c("11", "18", "80", "115", "217")))
+  expect_equal(
+    sort(unique(display[["Subject ID"]])),
+    sort(c("11", "18", "80", "115", "217"))
+  )
 })
 
 test_that("core range metrics and detailed bands use separate categories", {
@@ -35,11 +70,17 @@ test_that("core range metrics and detailed bands use separate categories", {
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
   core_range <- unique(display$Metric[display$Category == "Time in Range"])
-  detailed_range <- unique(display$Metric[display$Category == "Detailed Range Bands"])
+  detailed_range <- unique(display$Metric[
+    display$Category == "Detailed Range Bands"
+  ])
 
   expect_equal(
     core_range,
-    c("Time in range (70-180 mg/dL)", "Time below range (<70 mg/dL)", "Time above range (>180 mg/dL)")
+    c(
+      "Time in range (70-180 mg/dL)",
+      "Time below range (<70 mg/dL)",
+      "Time above range (>180 mg/dL)"
+    )
   )
   expect_equal(
     detailed_range,
@@ -54,15 +95,18 @@ test_that("core range metrics and detailed bands use separate categories", {
 
 test_that("range metric labels include threshold context", {
   catalog <- metric_display_catalog()
-  labels <- catalog$metric[catalog$raw_name %in% c(
-    "tir_percent",
-    "tbr_percent",
-    "tar_percent",
-    "tbr_level2_percent",
-    "tbr_level1_percent",
-    "tar_level1_percent",
-    "tar_level2_percent"
-  )]
+  labels <- catalog$metric[
+    catalog$raw_name %in%
+      c(
+        "tir_percent",
+        "tbr_percent",
+        "tar_percent",
+        "tbr_level2_percent",
+        "tbr_level1_percent",
+        "tar_level1_percent",
+        "tar_level2_percent"
+      )
+  ]
 
   expect_true(all(grepl("mg/dL", labels)))
   expect_true(any(grepl("70-180", labels, fixed = TRUE)))
@@ -90,12 +134,19 @@ test_that("range metric labels and definitions use current thresholds", {
   )
   catalog <- metric_display_catalog(thresholds = thresholds)
   demo <- example_missing_5pct_standardized()
-  display <- prepare_metrics_display(compute_base_core_metrics(demo, thresholds = thresholds), thresholds = thresholds)
+  display <- prepare_metrics_display(
+    compute_base_core_metrics(demo, thresholds = thresholds),
+    thresholds = thresholds
+  )
 
   expect_true("Time in range (80-160 mg/dL)" %in% catalog$metric)
   expect_true("Time below range (<80 mg/dL)" %in% display$Metric)
   expect_true("Level 1 above range (161-240 mg/dL)" %in% display$Metric)
-  expect_true(any(grepl("between 80 and 160 mg/dL", display$Definition, fixed = TRUE)))
+  expect_true(any(grepl(
+    "between 80 and 160 mg/dL",
+    display$Definition,
+    fixed = TRUE
+  )))
   expect_equal(
     key_metric_names(thresholds)[3:5],
     c(
@@ -109,12 +160,15 @@ test_that("range metric labels and definitions use current thresholds", {
 test_that("metric display is ordered by category, subject, and catalog order", {
   data <- data.frame(
     id = rep(c("B", "A"), each = 4),
-    timestamp = rep(parse_cgm_timestamp(c(
-      "2026-05-05 08:00:00",
-      "2026-05-05 08:05:00",
-      "2026-05-05 08:10:00",
-      "2026-05-05 08:15:00"
-    )), times = 2),
+    timestamp = rep(
+      parse_cgm_timestamp(c(
+        "2026-05-05 08:00:00",
+        "2026-05-05 08:05:00",
+        "2026-05-05 08:10:00",
+        "2026-05-05 08:15:00"
+      )),
+      times = 2
+    ),
     glucose = c(60, 100, 150, 220, 70, 110, 140, 180),
     id_source = subject_id_source_mapped(),
     stringsAsFactors = FALSE
@@ -122,7 +176,11 @@ test_that("metric display is ordered by category, subject, and catalog order", {
   display <- prepare_metrics_display(compute_base_core_metrics(data))
 
   expect_equal(unique(display$Category)[1:4], metric_category_order()[1:4])
-  coverage <- display[display$Category == "Data Coverage", , drop = FALSE]
+  coverage <- display[
+    display$Category == "Data Coverage" & display$Period == "All",
+    ,
+    drop = FALSE
+  ]
   expect_equal(coverage[["Subject ID"]], c("A", "B"))
 })
 
@@ -132,7 +190,10 @@ test_that("metrics table options group by Category", {
 
   expect_true("rowGroup" %in% names(options))
   expect_equal(options$rowGroup$dataSrc, match("Category", names(display)) - 1L)
-  expect_equal(options$columnDefs[[1]]$targets, match("Category", names(display)) - 1L)
+  expect_equal(
+    options$columnDefs[[1]]$targets,
+    match("Category", names(display)) - 1L
+  )
   expect_false(options$columnDefs[[1]]$visible)
   expect_equal(options$pageLength, 15)
 })
@@ -142,15 +203,27 @@ test_that("optional metric note is user-facing and hides internal wording", {
 
   expect_true(nzchar(note))
   expect_equal(optional_metric_note_text("complete"), "")
-  expect_false(grepl("CGManalyzer|iglu|engine|adapter|package", note, ignore.case = TRUE))
+  expect_false(grepl(
+    "CGManalyzer|iglu|engine|adapter|package",
+    note,
+    ignore.case = TRUE
+  ))
 })
 
 test_that("category filter can be excluded for stable summary cards", {
   demo <- example_missing_5pct_standardized()
   display <- prepare_metrics_display(compute_core_metrics(demo))
 
-  table_filtered <- filter_metrics_display(display, category = "Detailed Range Bands", include_category = TRUE)
-  card_filtered <- filter_metrics_display(display, category = "Detailed Range Bands", include_category = FALSE)
+  table_filtered <- filter_metrics_display(
+    display,
+    category = "Detailed Range Bands",
+    include_category = TRUE
+  )
+  card_filtered <- filter_metrics_display(
+    display,
+    category = "Detailed Range Bands",
+    include_category = FALSE
+  )
 
   expect_true(all(table_filtered$Category == "Detailed Range Bands"))
   expect_true("Mean glucose" %in% card_filtered$Metric)
@@ -177,10 +250,34 @@ test_that("All filter sentinel returns all metric display rows", {
     display,
     participant = all_filter_value(),
     group = all_filter_value(),
+    period = all_filter_value(),
     category = all_filter_value()
   )
 
   expect_equal(filtered, display)
+})
+
+test_that("metric display exposes and filters period labels", {
+  data <- data.frame(
+    id = rep("A", 4),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 01:00:00",
+      "2026-05-05 05:55:00",
+      "2026-05-05 06:00:00",
+      "2026-05-05 23:55:00"
+    )),
+    glucose = c(90, 110, 130, 150),
+    stringsAsFactors = FALSE
+  )
+  display <- prepare_metrics_display(compute_base_core_metrics(data))
+  choices <- metric_period_filter_choices(display)
+
+  expect_equal(unname(choices), time_window_values())
+  expect_setequal(unique(display$Period), unname(time_window_labels()))
+  expect_true(all(
+    filter_metrics_display(display, period = "nighttime")$Period ==
+      "Nighttime (00:00-05:59)"
+  ))
 })
 
 test_that("metric display hides Subject ID for one filename-derived subject", {
@@ -199,7 +296,10 @@ test_that("metric display hides Subject ID for one filename-derived subject", {
   forced <- prepare_metrics_display(metrics, show_subject_id = TRUE)
 
   expect_false("Subject ID" %in% names(display))
-  expect_equal(filter_metrics_display(display, participant = "one_subject"), display)
+  expect_equal(
+    filter_metrics_display(display, participant = "one_subject"),
+    display
+  )
   expect_true("Subject ID" %in% names(forced))
   expect_equal(unique(forced[["Subject ID"]]), "one_subject")
 })

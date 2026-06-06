@@ -65,7 +65,8 @@ test_that("bundled examples standardize with colon timestamps and expected missi
     expect_equal(nrow(qc), 5)
     expect_equal(qc$readings, example$readings_per_subject)
     expect_equal(qc$median_interval_minutes, rep(5, 5))
-    expect_equal(nrow(metrics), 5)
+    expect_equal(nrow(filter_metrics_by_period(metrics, "full_day")), 5)
+    expect_true(all(time_window_values() %in% metrics$metric_period))
     expect_true(all(
       c("conga_12h", "conga_24h", "modd", "lbgi", "hbgi", "j_index", "mage") %in%
         names(metrics)

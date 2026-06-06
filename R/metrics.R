@@ -1,5 +1,5 @@
 default_metric_groups <- function(data) {
-  groups <- c("id", "id_source", "group")
+  groups <- c("id", "id_source", "group", "metric_period")
   groups[groups %in% names(data)]
 }
 
@@ -90,7 +90,8 @@ compute_base_metrics_dt <- function(data, thresholds, by) {
 compute_base_core_metrics <- function(
   data,
   thresholds = default_cgm_thresholds(),
-  by = default_metric_groups(data)
+  by = default_metric_groups(data),
+  periods = time_window_values()
 ) {
   if (!all(c("id", "timestamp", "glucose") %in% names(data))) {
     stop("Metrics require standardized columns: id, timestamp, glucose.", call. = FALSE)
@@ -101,7 +102,25 @@ compute_base_core_metrics <- function(
     by <- "id"
   }
 
-  out <- compute_base_metrics_dt(data, thresholds = thresholds, by = by)
+  periods <- unique(vapply(periods %||% default_time_window(), normalize_time_window, character(1)))
+  period_rows <- lapply(periods, function(period) {
+    period_data <- filter_time_window_data(data, period)
+    if (!nrow(period_data)) {
+      return(NULL)
+    }
+    out <- compute_base_metrics_dt(period_data, thresholds = thresholds, by = by)
+    if (!nrow(out)) {
+      return(NULL)
+    }
+    out$metric_period <- period
+    out
+  })
+  period_rows <- Filter(Negate(is.null), period_rows)
+  if (!length(period_rows)) {
+    out <- data.frame()
+  } else {
+    out <- do.call(rbind, period_rows)
+  }
   row.names(out) <- NULL
   out$metric_engine <- "base_fallback"
   out
@@ -174,15 +193,35 @@ valid_metric_thresholds <- function(thresholds) {
 
 compute_metric_adapters <- function(
   data,
-  by = default_metric_groups(data)
+  by = default_metric_groups(data),
+  periods = time_window_values()
 ) {
   by <- by[by %in% names(data)]
   if (!length(by)) {
     by <- "id"
   }
 
-  out <- compute_cgmanalyzer_metrics(data, by = by)
-  merge_metric_adapter(out, compute_iglu_metrics(data, by = by), by = by)
+  periods <- unique(vapply(periods %||% default_time_window(), normalize_time_window, character(1)))
+  period_rows <- lapply(periods, function(period) {
+    period_data <- filter_time_window_data(data, period)
+    if (!nrow(period_data)) {
+      return(NULL)
+    }
+    out <- compute_cgmanalyzer_metrics(period_data, by = by)
+    out <- merge_metric_adapter(out, compute_iglu_metrics(period_data, by = by), by = by)
+    if (!nrow(out)) {
+      return(NULL)
+    }
+    out$metric_period <- period
+    out
+  })
+  period_rows <- Filter(Negate(is.null), period_rows)
+  if (!length(period_rows)) {
+    return(data.frame())
+  }
+  out <- do.call(rbind, period_rows)
+  row.names(out) <- NULL
+  out
 }
 
 merge_core_metric_outputs <- function(base, adapters, by = default_metric_groups(base)) {
@@ -218,16 +257,19 @@ merge_core_metric_outputs <- function(base, adapters, by = default_metric_groups
 compute_core_metrics <- function(
   data,
   thresholds = default_cgm_thresholds(),
-  by = default_metric_groups(data)
+  by = default_metric_groups(data),
+  periods = time_window_values()
 ) {
   by <- by[by %in% names(data)]
   if (!length(by)) {
     by <- "id"
   }
 
+  merge_by <- unique(c(by, "metric_period"))
+
   merge_core_metric_outputs(
-    compute_base_core_metrics(data, thresholds = thresholds, by = by),
-    compute_metric_adapters(data, by = by),
-    by = by
+    compute_base_core_metrics(data, thresholds = thresholds, by = by, periods = periods),
+    compute_metric_adapters(data, by = by, periods = periods),
+    by = merge_by
   )
 }

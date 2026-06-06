@@ -580,5 +580,5 @@ test_that("CGMissingDataR adapter can impute 5 percent missing example when avai
   expect_false(any(is.na(imputed$glucose[imputed$imputed_flag])))
   expect_s3_class(create_trace_plot(imputed), "ggplot")
   expect_equal(nrow(compute_qc_summary(imputed)), 5)
-  expect_equal(nrow(compute_core_metrics(imputed)), 5)
+  expect_equal(nrow(filter_metrics_by_period(compute_core_metrics(imputed), "full_day")), 5)
 })

@@ -5335,17 +5335,23 @@
     ".github/workflows/R-CMD-check.yaml": {
       "checksum": "d14f3e2b8b194dbf524efa7c190699e4"
     },
+    ".github/workflows/test-coverage.yaml": {
+      "checksum": "e2de69bedb15f5e6abb6c9579be3a5d3"
+    },
     ".Rbuildignore": {
-      "checksum": "66bdb7b705c0d94a8dec4001db9a0b41"
+      "checksum": "94465aa0116691eab0369dfc02853503"
     },
     ".Rprofile": {
-      "checksum": "840596911ed3b43ba903a2334518ebda"
+      "checksum": "62c3ea79f9635243daf3c3f40497d6bc"
     },
     "10.1177_19322968251353228.pdf": {
       "checksum": "11cf2ac7657433bafd3b976acdef20f8"
     },
     "app.R": {
       "checksum": "345df413e2ecef14f48af87d0f8953d4"
+    },
+    "codecov.yml": {
+      "checksum": "57544e4a6ad5ca1009e911ffd5bd337b"
     },
     "DESCRIPTION": {
       "checksum": "9f88cf8c9fb8ea934b8807f86b3a2e52"
@@ -5354,7 +5360,7 @@
       "checksum": "8bc3db13af176c99fa8776eac92a0a6f"
     },
     "dev_notes/decisions.md": {
-      "checksum": "a03f6d69f8ef17e4a705ac57c7ca8f84"
+      "checksum": "b847cea01dcda1308edc21d15aaf2492"
     },
     "dev_notes/logs/performance-20260531.csv": {
       "checksum": "bc1582797880161479cabd440423f5a5"
@@ -5369,10 +5375,10 @@
       "checksum": "d41d8cd98f00b204e9800998ecf8427e"
     },
     "dev_notes/manual_qa.md": {
-      "checksum": "2bde20eb6965ce0bd4dc12a3c97a0d6d"
+      "checksum": "14b18280240f546a4b83ac6b7cf35bcb"
     },
     "dev_notes/progress.md": {
-      "checksum": "6ca3ec97786d12cff38efe03b75eb819"
+      "checksum": "7f907ee790f26c4a5c8155673992ff62"
     },
     "dev_notes/README.md": {
       "checksum": "d636e94addd43467e81f899aecdac6a4"
@@ -5441,10 +5447,10 @@
       "checksum": "aff3112430a9ef04462b58c5a07e85c3"
     },
     "R/metric_display.R": {
-      "checksum": "31360ca4b6507e5633f6a8def62993ea"
+      "checksum": "a20f64e6101d0304830e3f84d3037717"
     },
     "R/metrics.R": {
-      "checksum": "abe288821911af839a2da65a69540eaa"
+      "checksum": "8b309f4becfd86f72e6a49025c9ef52f"
     },
     "R/missingness.R": {
       "checksum": "9359924f82c09ed83c7e373a5ca366d3"
@@ -5459,19 +5465,19 @@
       "checksum": "b5f423ce61e621b8441ad5216eca41dd"
     },
     "R/module_metrics.R": {
-      "checksum": "49d6f9f94e181294c0bbe2a2611b0f52"
+      "checksum": "f9b00f3b217d152d8075af2945f31028"
     },
     "R/module_plots.R": {
-      "checksum": "046194d85581875a109040973d7f9c64"
+      "checksum": "cdd2703a631352cfb1c5741ea75ecc1e"
     },
     "R/module_preprocessing.R": {
-      "checksum": "d8aeacee7abece078ed7e0ab88c7d198"
+      "checksum": "7833c135c40447494b1ab0918e3aa724"
     },
     "R/module_qc.R": {
       "checksum": "715b1c1ecaef5a04bb521e4b466ba0fb"
     },
     "R/module_stats.R": {
-      "checksum": "e596f925981d5b43b6206c6ec5adbcc0"
+      "checksum": "f8cebffcb1a1a640fad661489a5839c8"
     },
     "R/module_upload.R": {
       "checksum": "53c4283f3f486a87302a0326b570fdbf"
@@ -5483,7 +5489,7 @@
       "checksum": "eb95145121c6762a281ff9393ef1a603"
     },
     "R/plots.R": {
-      "checksum": "157da5c7b6cf9309b1972cb512c2f219"
+      "checksum": "f22af095981b3f8ba06f8153f74d9745"
     },
     "R/qc.R": {
       "checksum": "524dfe97a427fdac24173ab826369044"
@@ -5492,25 +5498,28 @@
       "checksum": "439e45ce7c1ee85565403c2935b36cc8"
     },
     "R/statistics.R": {
-      "checksum": "aaa501950720c67d9aa28d3b2c8f0b57"
+      "checksum": "b4636a40bc0e48a85482e024463b65b6"
     },
     "R/subject_id.R": {
       "checksum": "6a41347915f6b2f6add68304f60ae3c8"
     },
     "R/tab_polish.R": {
-      "checksum": "7e5ef7f6372b4c1eb1d7ebe9594f90b7"
+      "checksum": "4560c748394f302c5675a0d3b4973120"
     },
     "R/tab_state.R": {
       "checksum": "9beb7b1a7bc7b9f1ba6417ce9b8677ad"
+    },
+    "R/time_windows.R": {
+      "checksum": "de683bf9542546d8e7ba9260b77fe64c"
     },
     "R/upload_preview.R": {
       "checksum": "87cdf7f9d6d9a56cff99033be3805e10"
     },
     "README.md": {
-      "checksum": "2c46d122572b00a111768d6744209aa9"
+      "checksum": "fdc82dfd3ed955ecddb90c35a404a14b"
     },
     "README.Rmd": {
-      "checksum": "7726f89e570285a3268325d1947c88ce"
+      "checksum": "44e8ed1f0b5a17e8707a0c2858297c14"
     },
     "tests/testthat.R": {
       "checksum": "69780998900c27d2b14732a76a64f6f9"
@@ -5531,10 +5540,10 @@
       "checksum": "f90e7156fa18b0f650ec006f3d54c894"
     },
     "tests/testthat/test-demo-data.R": {
-      "checksum": "6e9b4a364b25bcb55e6f2a5ba60add6c"
+      "checksum": "0eb7917ab160bd46d69874de913fad0c"
     },
     "tests/testthat/test-export.R": {
-      "checksum": "db3792df7a99dc40402a31d446abb520"
+      "checksum": "951f03096120f7c5db0058611dac825c"
     },
     "tests/testthat/test-filter-choices.R": {
       "checksum": "cc68b2d9560fe0f16b8525cf45887048"
@@ -5543,16 +5552,16 @@
       "checksum": "e2489cf5b84f71dfe3aca5bd5602cb43"
     },
     "tests/testthat/test-imputation.R": {
-      "checksum": "963cf49b656d8a4120635f69de72b62f"
+      "checksum": "2f336007c29b3b0effd62edf329b4c57"
     },
     "tests/testthat/test-metric-adapters.R": {
       "checksum": "e9b4dab54b21c9370d6ae45d4bf40716"
     },
     "tests/testthat/test-metric-display.R": {
-      "checksum": "ada92313adf12d5693c582b9dad34116"
+      "checksum": "20810bf4142580e25f273834a3af363c"
     },
     "tests/testthat/test-metrics.R": {
-      "checksum": "a74e4780025599a96030aaff73c7b165"
+      "checksum": "55cdf15d9716f006cc194240e0162902"
     },
     "tests/testthat/test-missingness.R": {
       "checksum": "0041a993c03c55411e632d95b696b742"
@@ -5561,7 +5570,7 @@
       "checksum": "f6beaec55b3b0d5128ca4587959284ba"
     },
     "tests/testthat/test-plots.R": {
-      "checksum": "9e7ba63a2acf3a5423a3de39bfc6802c"
+      "checksum": "77af6d1ee7238e50a31dc1c4e7ce698f"
     },
     "tests/testthat/test-qc.R": {
       "checksum": "422454638733aed9e3973621b8ce6263"
@@ -5570,10 +5579,13 @@
       "checksum": "9ff268193b61f1a0da3b2edff5c53d62"
     },
     "tests/testthat/test-statistics.R": {
-      "checksum": "3aae0eac4c91ea06a344d7669cbf32a8"
+      "checksum": "ad3a9e044d777876dd18b242b6eb387a"
     },
     "tests/testthat/test-tab-polish.R": {
       "checksum": "35380dfc30e0bf47cb6bc3062b1cb5ae"
+    },
+    "tests/testthat/test-time-windows.R": {
+      "checksum": "1e63418b4fa94b9597c1de2491d37fb0"
     },
     "tests/testthat/test-upload-preview.R": {
       "checksum": "9acc75b3d60af56700a45f876d7ac1e6"

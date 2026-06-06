@@ -939,6 +939,7 @@ plot_selection_summary <- function(
   participant = "",
   group = "",
   day = "",
+  time_window = default_time_window(),
   displayed_rows = NULL
 ) {
   if (!is.data.frame(data) || !nrow(data)) {
@@ -953,17 +954,19 @@ plot_selection_summary <- function(
     plot_type = plot_type,
     participant = participant,
     group = group,
-    day = day
+    day = day,
+    time_window = time_window
   )
 
   full_rows <- nrow(filtered)
   summary <- data.frame(
-    Label = c("Rows plotted", "Subject IDs", "Days", "Date span"),
+    Label = c("Rows plotted", "Subject IDs", "Days", "Date span", "Time window"),
     Value = c(
       format_count(full_rows),
       format_count(length(subject_id_values(filtered))),
       format_count(length(unique(as.Date(filtered$timestamp)))),
-      format_date_span(filtered$timestamp)
+      format_date_span(filtered$timestamp),
+      time_window_label(time_window)
     ),
     stringsAsFactors = FALSE
   )

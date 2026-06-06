@@ -16,7 +16,8 @@ test_that("compute_core_metrics calculates core glucose summaries", {
     stringsAsFactors = FALSE
   )
 
-  metrics <- compute_core_metrics(data)
+  all_metrics <- compute_core_metrics(data)
+  metrics <- filter_metrics_by_period(all_metrics, "full_day")
 
   expect_equal(metrics$readings, 4)
   expect_equal(metrics$mean_glucose, mean(c(60, 100, 150, 220)))
@@ -26,6 +27,29 @@ test_that("compute_core_metrics calculates core glucose summaries", {
   expect_true("metric_engine" %in% names(metrics))
   expect_true(all(c("conga_12h", "conga_24h", "modd", "lbgi", "hbgi", "j_index", "mage") %in% names(metrics)))
   expect_false("conga_2h" %in% names(metrics))
+  expect_equal(sort(unique(all_metrics$metric_period)), c("daytime", "full_day"))
+})
+
+test_that("period metrics produce full-day daytime and nighttime rows when data exist", {
+  data <- data.frame(
+    id = rep("A", 4),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 01:00:00",
+      "2026-05-05 05:55:00",
+      "2026-05-05 06:00:00",
+      "2026-05-05 23:55:00"
+    )),
+    glucose = c(90, 110, 130, 150),
+    group = "Control",
+    stringsAsFactors = FALSE
+  )
+
+  metrics <- compute_base_core_metrics(data)
+
+  expect_equal(unique(metrics$metric_period), time_window_values())
+  expect_equal(metrics$readings[metrics$metric_period == "full_day"], 4)
+  expect_equal(metrics$readings[metrics$metric_period == "daytime"], 2)
+  expect_equal(metrics$readings[metrics$metric_period == "nighttime"], 2)
 })
 
 test_that("base core metrics are available without adapter columns", {

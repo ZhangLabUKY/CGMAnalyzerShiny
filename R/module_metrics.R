@@ -17,6 +17,7 @@ metrics_module_ui <- function(id) {
           class = "cgm-filter-bar cgm-metrics-filter-bar",
           shiny::uiOutput(ns("participant_filter")),
           shiny::uiOutput(ns("group_filter")),
+          shiny::uiOutput(ns("period_filter")),
           shiny::uiOutput(ns("category_filter"))
         )
       ),
@@ -187,6 +188,20 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
       )
     })
 
+    output$period_filter <- shiny::renderUI({
+      display <- display_metrics()
+      if (!"Period" %in% names(display)) {
+        return(NULL)
+      }
+      choices <- metric_period_filter_choices(display)
+      shiny::selectInput(
+        session$ns("period"),
+        "Period",
+        choices = choices,
+        selected = preserve_filter_selection(input$period %||% default_time_window(), choices)
+      )
+    })
+
     output$optional_metric_note <- shiny::renderUI({
       state <- display_metric_state()
       note <- optional_metric_note_text(adapter_status())
@@ -218,6 +233,7 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
         display_metrics(),
         participant = input$participant %||% "",
         group = input$group %||% "",
+        period = input$period %||% default_time_window(),
         include_category = FALSE
       )
     })

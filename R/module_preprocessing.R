@@ -55,9 +55,12 @@ preprocessing_settings_ui <- function(id) {
         )
       ),
       shiny::fluidRow(
-        shiny::column(4, shiny::uiOutput(ns("analysis_date_range_ui"))),
         shiny::column(
-          3,
+          2,
+          shiny::uiOutput(ns("analysis_date_range_ui"))
+        ),
+        shiny::column(
+          2,
           shiny::numericInput(
             ns("expected_study_duration_days"),
             "Expected study duration days",

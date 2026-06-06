@@ -3,10 +3,11 @@ stats_module_ui <- function(id) {
   shiny::tagList(
     shiny::h3("Statistical Testing"),
     shiny::fluidRow(
-      shiny::column(4, shiny::selectInput(ns("metric"), "Outcome metric", choices = character())),
-      shiny::column(4, shiny::selectInput(ns("grouping"), "Grouping variable", choices = character())),
+      shiny::column(3, shiny::selectInput(ns("metric"), "Outcome metric", choices = character())),
+      shiny::column(3, shiny::selectInput(ns("grouping"), "Grouping variable", choices = character())),
+      shiny::column(3, shiny::uiOutput(ns("period_filter"))),
       shiny::column(
-        4,
+        3,
         shiny::selectInput(
           ns("test_type"),
           "Test",
@@ -20,10 +21,34 @@ stats_module_ui <- function(id) {
 
 stats_module_server <- function(id, metrics, active_tab = NULL) {
   shiny::moduleServer(id, function(input, output, session) {
-    shiny::observeEvent(metrics(), {
+    selected_period <- shiny::reactive({
+      normalize_time_window(input$period %||% default_time_window())
+    })
+
+    statistics_metrics <- shiny::reactive({
+      filter_metrics_by_period(metrics(), selected_period())
+    })
+
+    output$period_filter <- shiny::renderUI({
       req_active_tab(active_tab, "statistics")
-      metric_choices <- metric_test_choices(metrics())
-      grouping <- grouping_choices(metrics())
+      data <- metrics()
+      if (!is.data.frame(data) || !"metric_period" %in% names(data)) {
+        return(NULL)
+      }
+      choices <- time_window_filter_choices()
+      shiny::selectInput(
+        session$ns("period"),
+        "Period",
+        choices = choices,
+        selected = preserve_filter_selection(input$period %||% default_time_window(), choices)
+      )
+    })
+
+    shiny::observeEvent(list(metrics(), selected_period()), {
+      req_active_tab(active_tab, "statistics")
+      current_metrics <- statistics_metrics()
+      metric_choices <- metric_test_choices(current_metrics)
+      grouping <- grouping_choices(current_metrics)
       shiny::updateSelectInput(
         session,
         "metric",
@@ -50,7 +75,13 @@ stats_module_server <- function(id, metrics, active_tab = NULL) {
           note = "Select a metric and grouping variable to run a test."
         )
       } else {
-        result <- run_metric_stat_test(metrics(), metric = metric, grouping = grouping, test_type = input$test_type)
+        result <- run_metric_stat_test(
+          metrics(),
+          metric = metric,
+          grouping = grouping,
+          test_type = input$test_type,
+          period = selected_period()
+        )
       }
       DT::datatable(result, rownames = FALSE, options = list(dom = "t", scrollX = FALSE))
     })

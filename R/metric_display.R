@@ -164,7 +164,7 @@ metric_display_catalog <- function(thresholds = default_cgm_thresholds()) {
 }
 
 metric_identifier_columns <- function(metrics) {
-  c("id", "id_source", "group")[c("id", "id_source", "group") %in% names(metrics)]
+  c("id", "id_source", "group", "metric_period")[c("id", "id_source", "group", "metric_period") %in% names(metrics)]
 }
 
 metric_category_order <- function() {
@@ -182,6 +182,7 @@ metric_category_order <- function() {
 empty_metrics_display <- function() {
   data.frame(
     `Subject ID` = character(),
+    Period = character(),
     Category = character(),
     Metric = character(),
     Definition = character(),
@@ -201,6 +202,10 @@ metric_category_filter_choices <- function(display) {
   ordered <- metric_category_order()
   ordered <- ordered[ordered %in% values]
   filter_select_choices(ordered)
+}
+
+metric_period_filter_choices <- function(display = NULL) {
+  time_window_filter_choices()
 }
 
 format_metric_value <- function(value, digits) {
@@ -240,16 +245,25 @@ prepare_metrics_display <- function(metrics, thresholds = default_cgm_thresholds
     if ("group" %in% id_columns) {
       out$Group <- as.character(metrics$group)
     }
+    if ("metric_period" %in% id_columns) {
+      out$Period <- vapply(metrics$metric_period, time_window_label, character(1))
+    }
     out
   })
 
   out <- do.call(rbind, rows)
   out$Category <- factor(out$Category, levels = metric_category_order(), ordered = TRUE)
-  order_columns <- c(intersect("Category", names(out)), intersect(c("Subject ID", "Group"), names(out)), ".metric_order")
+  if ("Period" %in% names(out)) {
+    out$Period <- factor(out$Period, levels = unname(time_window_labels()), ordered = TRUE)
+  }
+  order_columns <- c(intersect("Category", names(out)), intersect(c("Period", "Subject ID", "Group"), names(out)), ".metric_order")
   out <- out[do.call(order, out[order_columns]), , drop = FALSE]
   out$Category <- as.character(out$Category)
+  if ("Period" %in% names(out)) {
+    out$Period <- as.character(out$Period)
+  }
   out$.metric_order <- NULL
-  leading <- c(intersect("Subject ID", names(out)), intersect("Group", names(out)))
+  leading <- c(intersect("Subject ID", names(out)), intersect("Group", names(out)), intersect("Period", names(out)))
   out <- out[, c(leading, "Category", "Metric", "Definition", "Value", "Units"), drop = FALSE]
   row.names(out) <- NULL
   out
@@ -259,11 +273,13 @@ filter_metrics_display <- function(
   display,
   participant = "",
   group = "",
+  period = "",
   category = "",
   include_category = TRUE
 ) {
   participant <- normalize_filter_value(participant)
   group <- normalize_filter_value(group)
+  period <- normalize_filter_value(period)
   category <- normalize_filter_value(category)
 
   if ("Subject ID" %in% names(display) && nzchar(participant %||% "")) {
@@ -271,6 +287,9 @@ filter_metrics_display <- function(
   }
   if ("Group" %in% names(display) && nzchar(group %||% "")) {
     display <- display[display$Group == group, , drop = FALSE]
+  }
+  if ("Period" %in% names(display) && nzchar(period %||% "")) {
+    display <- display[display$Period == time_window_label(period), , drop = FALSE]
   }
   if (isTRUE(include_category) && nzchar(category %||% "")) {
     display <- display[display$Category == category, , drop = FALSE]

@@ -233,10 +233,35 @@ test_that("plot filters support All sentinel for participant, group, and day", {
     day = all_filter_value()
   )
   filtered <- filter_plot_data(data, participant = "A", group = "Control", day = "2026-05-05")
+  daytime <- filter_plot_data(data, time_window = "daytime")
+  nighttime <- filter_plot_data(data, time_window = "nighttime")
 
   expect_equal(nrow(all_data), nrow(data))
   expect_equal(nrow(filtered), 1)
   expect_equal(filtered$id, "A")
+  expect_equal(nrow(daytime), nrow(data))
+  expect_equal(nrow(nighttime), 0)
+})
+
+test_that("plot time window filtering updates summaries and filenames", {
+  data <- data.frame(
+    id = rep("A", 4),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 01:00:00",
+      "2026-05-05 05:55:00",
+      "2026-05-05 06:00:00",
+      "2026-05-05 23:55:00"
+    )),
+    glucose = c(90, 110, 130, 150),
+    stringsAsFactors = FALSE
+  )
+
+  summary <- plot_selection_summary(data, time_window = "nighttime")
+  filename <- plot_download_filename(data, plot_type = "trace", time_window = "nighttime")
+
+  expect_equal(summary$Value[summary$Label == "Rows plotted"], "2")
+  expect_equal(summary$Value[summary$Label == "Time window"], "Nighttime (00:00-05:59)")
+  expect_match(filename, "time-nighttime")
 })
 
 test_that("daily overlay day helpers normalize default All days", {
@@ -403,9 +428,9 @@ test_that("plot download filenames include selected filters safely", {
 
   expect_equal(
     daily_name,
-    "cgm_daily-overlay_subject-subject-a_group-control-group_days-2026-05-05_to_2026-05-06.png"
+    "cgm_daily-overlay_subject-subject-a_group-control-group_time-full-day_days-2026-05-05_to_2026-05-06.png"
   )
-  expect_match(trace_name, "^cgm_trace_all-subjects_dates-2026-05-05-to-2026-05-07\\.png$")
+  expect_match(trace_name, "^cgm_trace_all-subjects_time-full-day_dates-2026-05-05-to-2026-05-07\\.png$")
   expect_false(grepl("[^A-Za-z0-9._-]", daily_name))
 })
 
@@ -449,10 +474,33 @@ test_that("AGP summary data produces time-of-day quantiles", {
   )
 
   agp <- prepare_agp_summary_data(data, bin_minutes = 30)
+  empty_night <- prepare_agp_summary_data(data, time_window = "nighttime", bin_minutes = 30)
 
   expect_equal(agp$time_minutes, c(495, 525))
   expect_true(all(c("q05", "q25", "median", "q75", "q95", "n") %in% names(agp)))
   expect_equal(agp$n, c(2, 2))
+  expect_equal(nrow(empty_night), 0)
+})
+
+test_that("trace time-window plots break lines by subject and date", {
+  data <- data.frame(
+    id = rep("A", 4),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 01:00:00",
+      "2026-05-05 01:05:00",
+      "2026-05-06 01:00:00",
+      "2026-05-06 01:05:00"
+    )),
+    glucose = c(90, 95, 100, 105),
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  full_groups <- unique(ggplot2::ggplot_build(create_trace_plot(data))$data[[1]]$group)
+  night_groups <- unique(ggplot2::ggplot_build(create_trace_plot(data, time_window = "nighttime"))$data[[1]]$group)
+
+  expect_length(full_groups, 1)
+  expect_length(night_groups, 2)
 })
 
 test_that("AGP summary is unchanged by trace display downsampling helpers", {
@@ -553,13 +601,14 @@ test_that("plots module rendering does not depend on metrics or complexity resul
 })
 
 test_that("plot filter helper selects relevant controls by plot type", {
-  expect_equal(plot_filter_layout_order("trace"), c("subject_filter", "group_filter"))
-  expect_equal(plot_filter_layout_order("agp"), c("subject_filter", "group_filter"))
-  expect_equal(plot_filter_layout_order("daily_overlay"), c("day_filter", "subject_filter", "group_filter"))
+  expect_equal(plot_filter_layout_order("trace"), c("time_window_filter", "subject_filter", "group_filter"))
+  expect_equal(plot_filter_layout_order("agp"), c("time_window_filter", "subject_filter", "group_filter"))
+  expect_equal(plot_filter_layout_order("daily_overlay"), c("time_window_filter", "day_filter", "subject_filter", "group_filter"))
 
   html <- paste(as.character(plot_filter_layout_ui(shiny::NS("plots"), "daily_overlay")), collapse = "\n")
   expect_true(grepl("cgm-plots-filter-bar", html, fixed = TRUE))
   expect_true(grepl("plots-plot_type", html, fixed = TRUE))
+  expect_true(grepl("plots-time_window_filter", html, fixed = TRUE))
   expect_true(grepl("plots-day_filter", html, fixed = TRUE))
   expect_true(grepl("plots-subject_filter", html, fixed = TRUE))
 })

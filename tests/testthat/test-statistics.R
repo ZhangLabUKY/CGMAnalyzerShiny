@@ -47,3 +47,17 @@ test_that("run_metric_stat_test reports unavailable grouping for current bundled
   expect_true(is.na(result$`P-value`))
   expect_match(result$Note, "not available")
 })
+
+test_that("run_metric_stat_test filters period rows before testing", {
+  full <- transform(synthetic_metric_data(), metric_period = "full_day")
+  day <- transform(synthetic_metric_data(), metric_period = "daytime", mean_glucose = mean_glucose + 20)
+  metrics <- rbind(full, day)
+
+  default_result <- run_metric_stat_test(metrics, metric = "mean_glucose", grouping = "group", test_type = "welch_t")
+  daytime_result <- run_metric_stat_test(metrics, metric = "mean_glucose", grouping = "group", test_type = "welch_t", period = "daytime")
+
+  expect_equal(default_result$N, "4 / 4")
+  expect_equal(daytime_result$N, "4 / 4")
+  expect_true(is.finite(default_result$`P-value`))
+  expect_true(is.finite(daytime_result$`P-value`))
+})
