@@ -277,13 +277,16 @@ filter_metrics_display <- function(
   category = "",
   include_category = TRUE
 ) {
-  participant <- normalize_filter_value(participant)
   group <- normalize_filter_value(group)
   period <- normalize_filter_value(period)
   category <- normalize_filter_value(category)
 
-  if ("Subject ID" %in% names(display) && nzchar(participant %||% "")) {
-    display <- display[display[["Subject ID"]] == participant, , drop = FALSE]
+  if ("Subject ID" %in% names(display)) {
+    display <- filter_data_by_subject_selection(
+      display,
+      participant,
+      id_col = "Subject ID"
+    )
   }
   if ("Group" %in% names(display) && nzchar(group %||% "")) {
     display <- display[display$Group == group, , drop = FALSE]

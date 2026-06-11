@@ -1,6 +1,7 @@
 background_worker_state <- new.env(parent = emptyenv())
 background_worker_state$generation <- 0L
 background_worker_state$configured <- FALSE
+background_worker_state$workers <- NULL
 
 background_worker_count <- function(available_cores = NULL) {
   cores <- available_cores
@@ -23,9 +24,14 @@ configure_background_workers <- function(workers = background_worker_count(), pl
   }
   plan_fn <- plan_fn %||% future::plan
   workers <- background_worker_count(workers + 1L)
+  if (isTRUE(background_worker_state$configured) && identical(background_worker_state$workers, workers)) {
+    background_worker_state$generation <- background_worker_state$generation + 1L
+    return(background_worker_state$generation)
+  }
   plan_fn(future::multisession, workers = workers)
   background_worker_state$generation <- background_worker_state$generation + 1L
   background_worker_state$configured <- TRUE
+  background_worker_state$workers <- workers
   background_worker_state$generation
 }
 
@@ -36,12 +42,13 @@ cleanup_background_workers <- function(plan_fn = NULL) {
   plan_fn <- plan_fn %||% future::plan
   plan_fn(future::sequential)
   background_worker_state$configured <- FALSE
+  background_worker_state$workers <- NULL
   TRUE
 }
 
 schedule_background_worker_cleanup <- function(
   token = NULL,
-  delay = 60,
+  delay = 300,
   scheduler = NULL,
   cleanup_fn = NULL
 ) {

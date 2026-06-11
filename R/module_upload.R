@@ -74,14 +74,36 @@ upload_module_server <- function(id) {
         probes <- file_probes()
         row_boundaries <- selected_import_row_boundaries(probes, input)
         upload_mode <- if (nrow(files) > 1L) "multi_file" else "single_file"
+        full_dimensions <- cgm_timed(
+          "upload_file_dimensions",
+          do.call(rbind, Map(
+            function(datapath, filename, header_row, first_data_row) {
+              read_cgm_file_dimensions(
+                datapath,
+                filename,
+                header_row = header_row,
+                first_data_row = first_data_row
+              )
+            },
+            files$datapath,
+            files$name,
+            row_boundaries$header_row,
+            row_boundaries$first_data_row
+          )),
+          rows = nrow(files),
+          context = list(upload_mode = upload_mode)
+        )
+        full_dimensions <- as.data.frame(full_dimensions, stringsAsFactors = FALSE)
+        full_dimensions$file <- files$name
         combined <- tryCatch(
           cgm_timed(
-            "upload_read_combine",
+            "upload_read_mapping_sample",
             combine_uploaded_files(
               files$datapath,
               files$name,
               header_rows = row_boundaries$header_row,
-              first_data_rows = row_boundaries$first_data_row
+              first_data_rows = row_boundaries$first_data_row,
+              nrows = upload_mapping_sample_row_limit()
             ),
             context = list(files = nrow(files), upload_mode = upload_mode)
           ),
@@ -101,7 +123,10 @@ upload_module_server <- function(id) {
             upload_mode = upload_mode,
             import_error = import_error,
             import_probes = probes,
-            row_boundaries = row_boundaries
+            row_boundaries = row_boundaries,
+            datapaths = files$datapath,
+            full_dimensions = full_dimensions,
+            sampled = TRUE
           ))
         }
         return(list(
@@ -110,7 +135,10 @@ upload_module_server <- function(id) {
           demo = FALSE,
           upload_mode = upload_mode,
           import_probes = probes,
-          row_boundaries = row_boundaries
+          row_boundaries = row_boundaries,
+          datapaths = files$datapath,
+          full_dimensions = full_dimensions,
+          sampled = TRUE
         ))
       }
 
@@ -156,19 +184,33 @@ upload_module_server <- function(id) {
       } else {
         "combined file"
       }
-      shiny::tags$p(
-        paste(
-          source_label,
-          "-",
-          mode_label,
-          "-",
-          length(data$files),
-          "file(s),",
-          nrow(data$data),
-          "row(s),",
-          ncol(data$data),
-          "column(s)."
+      dimensions <- upload_full_dimensions(data)
+      full_rows_label <- upload_dimension_label(dimensions$rows, "rows")
+      full_columns_label <- upload_dimension_label(dimensions$columns, "columns")
+      preview_note <- if (isTRUE(data$sampled)) {
+        shiny::tags$p(
+          class = "text-muted",
+          paste0("Setup preview uses ", format_count(nrow(data$data)), " sampled rows.")
         )
+      } else {
+        NULL
+      }
+      shiny::tagList(
+        shiny::tags$p(
+          paste0(
+            source_label,
+            " - ",
+            mode_label,
+            " - ",
+            length(data$files),
+            " file(s), full data: ",
+            full_rows_label,
+            " x ",
+            full_columns_label,
+            "."
+          )
+        ),
+        preview_note
       )
     })
 

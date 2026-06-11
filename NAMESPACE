@@ -2,3 +2,5 @@
 
 export(run_app)
 import(data.table)
+importFrom(Rcpp,evalCpp)
+useDynLib(CGMAnalyzerShiny, .registration = TRUE)

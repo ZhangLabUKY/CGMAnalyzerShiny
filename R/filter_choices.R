@@ -14,6 +14,47 @@ filter_select_choices <- function(values, all_label = "All") {
   c(stats::setNames(all_filter_value(), all_label), stats::setNames(values, values))
 }
 
+subject_filter_choices <- function(values, all_label = "All") {
+  values <- sort(clean_filter_values(values))
+  c(stats::setNames(values, values), stats::setNames(all_filter_value(), all_label))
+}
+
+default_subject_selection <- function(values) {
+  values <- sort(clean_filter_values(values))
+  if (!length(values)) {
+    return(all_filter_value())
+  }
+  values[[1L]]
+}
+
+preserve_subject_filter_selection <- function(selected, choices, values) {
+  selected <- selected %||% default_subject_selection(values)
+  if (!length(selected)) {
+    selected <- default_subject_selection(values)
+  }
+  selected <- selected[[1L]]
+  if (selected %in% unname(choices)) {
+    selected
+  } else {
+    default_subject_selection(values)
+  }
+}
+
+filter_data_by_subject_selection <- function(
+  data,
+  value,
+  id_col = "id"
+) {
+  if (!is.data.frame(data) || !nrow(data) || !id_col %in% names(data)) {
+    return(data)
+  }
+  value <- normalize_filter_value(value)
+  if (!nzchar(value)) {
+    return(data)
+  }
+  data[as.character(data[[id_col]]) == value, , drop = FALSE]
+}
+
 normalize_filter_value <- function(value) {
   value <- value %||% ""
   if (!length(value)) {

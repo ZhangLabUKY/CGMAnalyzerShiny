@@ -2,6 +2,10 @@ cgm_data_signature <- function(data) {
   if (is.null(data) || !is.data.frame(data)) {
     return(list(rows = 0L))
   }
+  cached <- attr(data, "cgm_data_signature", exact = TRUE)
+  if (!is.null(cached) && identical(cached$rows, nrow(data))) {
+    return(cached)
+  }
 
   timestamp <- if ("timestamp" %in% names(data)) data$timestamp else as.POSIXct(character())
   glucose <- if ("glucose" %in% names(data)) data$glucose else numeric()
@@ -22,6 +26,33 @@ cgm_data_signature <- function(data) {
     missing_glucose = sum(is.na(glucose)),
     glucose_sum = sum(as.numeric(glucose), na.rm = TRUE),
     imputed_rows = sum(imputed_flag %in% TRUE, na.rm = TRUE)
+  )
+}
+
+attach_cgm_data_signature <- function(data) {
+  attr(data, "cgm_data_signature") <- cgm_data_signature(data)
+  data
+}
+
+cgm_maybe_gc <- function(rows = NULL, threshold = 500000L) {
+  rows <- suppressWarnings(as.numeric(rows %||% NA_real_))
+  threshold <- suppressWarnings(as.numeric(threshold %||% 500000L))
+  if (!is.na(rows) && !is.na(threshold) && rows >= threshold) {
+    invisible(gc(verbose = FALSE))
+  } else {
+    invisible(NULL)
+  }
+}
+
+cgm_suppress_non_cgma_messages <- function(expr) {
+  withCallingHandlers(
+    force(expr),
+    message = function(message) {
+      text <- conditionMessage(message)
+      if (!startsWith(text, "[CGMA perf]")) {
+        invokeRestart("muffleMessage")
+      }
+    }
   )
 }
 

@@ -57,6 +57,125 @@ test_that("detect_gap_periods reports known timestamp gaps", {
   expect_equal(gaps$estimated_missing_readings, 2)
 })
 
+test_that("gap period grouping separates non-contiguous inferred gaps", {
+  expanded <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 00:05:00",
+      "2026-05-05 00:10:00",
+      "2026-05-05 00:30:00",
+      "2026-05-05 00:35:00"
+    )),
+    glucose = NA_real_,
+    missing_source = missing_source_gap(),
+    inserted_timestamp_gap = TRUE,
+    stringsAsFactors = FALSE
+  )
+
+  gaps <- gap_periods_from_expanded(expanded, interval_minutes = 5)
+
+  expect_equal(nrow(gaps), 2)
+  expect_equal(gaps$gap_minutes, c(10, 10))
+  expect_equal(gaps$estimated_missing_readings, c(2L, 2L))
+  expect_equal(format_cgm_timestamp_iso(gaps$gap_start), c(
+    "2026-05-05T00:05:00",
+    "2026-05-05T00:30:00"
+  ))
+})
+
+test_that("missing glucose and timestamp gap counts agree across display helpers", {
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 00:00:00",
+      "2026-05-05 00:05:00",
+      "2026-05-05 00:10:00",
+      "2026-05-05 00:30:00"
+    )),
+    glucose = c(100, NA, 120, 130),
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+  precomputed <- missingness_precompute(data, interval_minutes = 5)
+
+  grid <- missingness_grid_summary_by_id(data, interval_minutes = 5, precomputed = precomputed)
+  summary <- compute_missingness_summary(data, interval_minutes = 5, precomputed = precomputed)
+  imputation_summary <- imputation_missingness_summary(
+    data,
+    interval_minutes = 5,
+    precomputed = precomputed,
+    include_timestamp_gaps = TRUE
+  )
+  comparison <- compare_missingness_summaries(
+    data,
+    data,
+    interval_minutes = 5,
+    original_precomputed = precomputed,
+    analysis_precomputed = precomputed
+  )
+  calendar <- compute_missingness_calendar_data(data, interval_minutes = 5, precomputed = precomputed)
+
+  expect_equal(grid$explicit_missing_glucose, 1L)
+  expect_equal(grid$estimated_missing_readings, 3L)
+  expect_equal(grid$missing_glucose, 4L)
+  expect_equal(summary$gap_count, 1L)
+  expect_equal(summary$estimated_missing_readings, 3L)
+  expect_equal(imputation_summary$explicit_missing_glucose, 1L)
+  expect_equal(imputation_summary$estimated_missing_readings, 3L)
+  expect_equal(imputation_summary$missing_glucose, 4L)
+  expect_equal(comparison[["Timestamp gaps"]], 1L)
+  expect_equal(comparison[["Estimated missing readings from gaps"]], 3L)
+  expect_equal(calendar$timestamp_gaps[calendar$date == as.Date("2026-05-05")], 1L)
+  expect_equal(calendar$estimated_missing_readings[calendar$date == as.Date("2026-05-05")], 3L)
+  expect_equal(calendar$missing_glucose[calendar$date == as.Date("2026-05-05")], 4L)
+})
+
+test_that("fast missingness review matches expanded grid without materializing rows", {
+  data <- data.frame(
+    id = c(rep("A", 5), rep("B", 4)),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 00:00:00",
+      "2026-05-05 00:04:00",
+      "2026-05-05 00:06:00",
+      "2026-05-05 00:15:00",
+      "2026-05-05 00:30:00",
+      "2026-05-05 00:00:00",
+      "2026-05-05 00:05:00",
+      "2026-05-05 00:20:00",
+      "2026-05-05 00:25:00"
+    )),
+    glucose = c(100, NA, 115, 130, 140, 150, 155, NA, 165),
+    stringsAsFactors = FALSE
+  )
+
+  fast <- fast_missingness_grid_summary_by_id(data, interval_minutes = 5)
+  expanded <- missingness_grid_summary_by_id(data, interval_minutes = 5)
+  fast <- fast[order(fast$id), , drop = FALSE]
+  expanded <- expanded[order(expanded$id), , drop = FALSE]
+
+  expect_equal(fast, expanded)
+  expect_equal(sum(fast$explicit_missing_glucose), 1L)
+  expect_equal(sum(fast$estimated_missing_readings), 5L)
+  expect_equal(sum(fast$missing_glucose), 6L)
+})
+
+test_that("fast missingness review detects gap-only missingness", {
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp(c("2026-05-05 00:00:00", "2026-05-05 00:20:00")),
+    glucose = c(100, 120),
+    stringsAsFactors = FALSE
+  )
+
+  summary <- fast_missingness_grid_summary_by_id(data, interval_minutes = 5)
+
+  expect_equal(summary$explicit_missing_glucose, 0L)
+  expect_equal(summary$estimated_missing_readings, 3L)
+  expect_equal(summary$missing_glucose, 3L)
+  expect_equal(summary$expanded_rows, 5L)
+  expect_equal(summary$missing_glucose_rate, 60)
+})
+
 test_that("grid missingness snaps off-grid timestamps and keeps non-missing duplicates", {
   data <- data.frame(
     id = c("A", "A", "A", "A"),
@@ -291,6 +410,39 @@ test_that("daily coverage calendar uses subject active date spans", {
     2
   )
   expect_lt(max(calendar$calendar_x), 5)
+})
+
+test_that("missingness data.table joins preserve daily calendar values", {
+  data <- data.frame(
+    id = c("A", "A", "B", "B", "B"),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-02-01 00:00:00",
+      "2026-02-01 01:00:00",
+      "2026-02-01 00:00:00",
+      "2026-02-01 02:00:00",
+      "2026-02-02 00:00:00"
+    )),
+    glucose = c(100, NA, 130, 150, 160),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = c(FALSE, TRUE, FALSE, FALSE, FALSE),
+    stringsAsFactors = FALSE
+  )
+
+  gaps <- detect_gap_periods(data, interval_minutes = 60)
+  calendar <- compute_missingness_calendar_data(data, gaps = gaps, interval_minutes = 60)
+
+  a_day <- calendar[calendar$id == "A" & calendar$date == as.Date("2026-02-01"), , drop = FALSE]
+  b_day <- calendar[calendar$id == "B" & calendar$date == as.Date("2026-02-01"), , drop = FALSE]
+
+  expect_equal(a_day$readings, 2L)
+  expect_equal(a_day$imputed_rows, 1L)
+  expect_equal(a_day$missing_glucose, 1L)
+  expect_equal(b_day$readings, 2L)
+  expect_equal(b_day$timestamp_gaps, 2L)
+  expect_equal(b_day$estimated_missing_readings, 22L)
 })
 
 test_that("daily coverage month ticks use compact chronological positions", {

@@ -201,6 +201,47 @@ select_evenly_spaced_rows <- function(idx, n) {
   idx[unique(round(seq(1, length(idx), length.out = n)))]
 }
 
+select_lttb_rows <- function(data, idx, n) {
+  if (!length(idx) || n <= 0L || length(idx) <= n) {
+    return(select_evenly_spaced_rows(idx, n))
+  }
+  candidate <- data.frame(
+    x = as.numeric(data$timestamp[idx]),
+    y = as.numeric(data$glucose[idx]),
+    .row_id = idx,
+    stringsAsFactors = FALSE
+  )
+  candidate <- candidate[is.finite(candidate$x) & is.finite(candidate$y), , drop = FALSE]
+  if (nrow(candidate) <= n) {
+    return(candidate$.row_id)
+  }
+  selected <- tryCatch(
+    lttb_indices_cpp(candidate$x, candidate$y, as.integer(n)),
+    error = function(error) NULL
+  )
+  if (is.integer(selected) && length(selected)) {
+    selected <- selected[selected >= 1L & selected <= nrow(candidate)]
+    if (length(selected)) {
+      return(as.integer(candidate$.row_id[selected]))
+    }
+  }
+  select_evenly_spaced_rows(idx, n)
+}
+
+protected_plot_rows <- function(data, row_idx) {
+  protected <- row_idx[data$imputed_flag %in% TRUE]
+  glucose <- suppressWarnings(as.numeric(data$glucose))
+  finite <- row_idx[is.finite(glucose)]
+  if (length(finite)) {
+    protected <- c(
+      protected,
+      finite[which.min(glucose[finite])],
+      finite[which.max(glucose[finite])]
+    )
+  }
+  unique(protected)
+}
+
 downsample_one_plot_group <- function(data, max_points) {
   if (!is.finite(max_points) || nrow(data) <= max_points) {
     return(data)
@@ -209,12 +250,11 @@ downsample_one_plot_group <- function(data, max_points) {
   max_points <- as.integer(max_points)
   data <- data[order(data$timestamp), , drop = FALSE]
   row_idx <- seq_len(nrow(data))
-  imputed_idx <- row_idx[data$imputed_flag %in% TRUE]
-  keep_imputed <- select_evenly_spaced_rows(imputed_idx, max_points)
-  remaining_slots <- max_points - length(keep_imputed)
-  candidate_idx <- setdiff(row_idx, keep_imputed)
-  keep_candidates <- select_evenly_spaced_rows(candidate_idx, remaining_slots)
-  keep <- sort(unique(c(keep_imputed, keep_candidates)))
+  keep_protected <- select_evenly_spaced_rows(protected_plot_rows(data, row_idx), max_points)
+  remaining_slots <- max_points - length(keep_protected)
+  candidate_idx <- setdiff(row_idx, keep_protected)
+  keep_candidates <- select_lttb_rows(data, candidate_idx, remaining_slots)
+  keep <- sort(unique(c(keep_protected, keep_candidates)))
   data[keep, , drop = FALSE]
 }
 
@@ -239,7 +279,7 @@ plot_filter_available <- function(data, column, min_values = 2L) {
 
 plot_subject_filter_choices <- function(data) {
   values <- if ("id" %in% names(data)) data$id else character()
-  filter_select_choices(sort(clean_filter_values(values)), all_label = "All")
+  subject_filter_choices(values, all_label = "All")
 }
 
 normalize_plot_days <- function(day) {
@@ -285,15 +325,18 @@ preserve_plot_day_selection <- function(selected, choices, previous = all_filter
   choice_values[choice_values %in% selected & choice_values != all_filter_value()]
 }
 
-filter_plot_data <- function(data, participant = "", group = "", day = "", time_window = default_time_window()) {
-  participant <- normalize_filter_value(participant)
+filter_plot_data <- function(
+  data,
+  participant = "",
+  group = "",
+  day = "",
+  time_window = default_time_window()
+) {
   group <- normalize_filter_value(group)
   day <- normalize_plot_days(day)
   time_window <- normalize_time_window(time_window)
 
-  if (nzchar(participant)) {
-    data <- data[data$id == participant, , drop = FALSE]
-  }
+  data <- filter_data_by_subject_selection(data, participant)
   if ("group" %in% names(data) && nzchar(group)) {
     data <- data[data$group == group, , drop = FALSE]
   }
@@ -303,13 +346,36 @@ filter_plot_data <- function(data, participant = "", group = "", day = "", time_
   filter_time_window_data(data, time_window)
 }
 
-available_plot_days <- function(data, participant = "", group = "", time_window = default_time_window()) {
-  data <- filter_plot_data(data, participant = participant, group = group, time_window = time_window)
+available_plot_days <- function(
+  data,
+  participant = "",
+  group = "",
+  time_window = default_time_window()
+) {
+  data <- filter_plot_data(
+    data,
+    participant = participant,
+    group = group,
+    time_window = time_window
+  )
   sort(unique(as.character(as.Date(data$timestamp[!is.na(data$timestamp)]))))
 }
 
-plot_day_filter_choices <- function(data, participant = "", group = "", time_window = default_time_window()) {
-  filter_select_choices(available_plot_days(data, participant = participant, group = group, time_window = time_window), all_label = "All days")
+plot_day_filter_choices <- function(
+  data,
+  participant = "",
+  group = "",
+  time_window = default_time_window()
+) {
+  filter_select_choices(
+    available_plot_days(
+      data,
+      participant = participant,
+      group = group,
+      time_window = time_window
+    ),
+    all_label = "All days"
+  )
 }
 
 is_finite_cgm_timestamp <- function(timestamp) {
@@ -506,7 +572,13 @@ prepare_time_of_day_plot_data <- function(
   time_window = default_time_window(),
   max_points_per_participant = Inf
 ) {
-  data <- filter_plot_data(data, participant = participant, group = group, day = day, time_window = time_window)
+  data <- filter_plot_data(
+    data,
+    participant = participant,
+    group = group,
+    day = day,
+    time_window = time_window
+  )
   data <- data[is_finite_cgm_timestamp(data$timestamp), , drop = FALSE]
   data <- prepare_plot_display_data(data, max_points_per_participant = max_points_per_participant)
   data <- ensure_plot_imputed_flag(data)
@@ -599,6 +671,199 @@ create_daily_overlay_plot <- function(
     plot <- plot + ggplot2::facet_wrap(~id)
   }
   plot
+}
+
+plotly_webgl_row_threshold <- function() {
+  5000L
+}
+
+plotly_empty_plot <- function(message = "No data available") {
+  plotly::layout(
+    plotly::plot_ly(type = "scatter", mode = "markers"),
+    xaxis = list(visible = FALSE),
+    yaxis = list(visible = FALSE),
+    annotations = list(list(
+      text = message,
+      x = 0.5,
+      y = 0.5,
+      xref = "paper",
+      yref = "paper",
+      showarrow = FALSE
+    ))
+  )
+}
+
+plotly_threshold_shapes <- function(thresholds) {
+  lapply(c(thresholds$tir_lower, thresholds$tir_upper), function(y) {
+    list(
+      type = "line",
+      xref = "paper",
+      x0 = 0,
+      x1 = 1,
+      y0 = y,
+      y1 = y,
+      line = list(color = "#C95142", dash = "dash", width = 1)
+    )
+  })
+}
+
+maybe_to_webgl <- function(plotly_obj, rows, threshold = plotly_webgl_row_threshold()) {
+  rows <- suppressWarnings(as.integer(rows %||% 0L))
+  threshold <- suppressWarnings(as.integer(threshold %||% plotly_webgl_row_threshold()))
+  if (!is.na(rows) && !is.na(threshold) && rows >= threshold) {
+    return(plotly::toWebGL(plotly_obj))
+  }
+  plotly_obj
+}
+
+create_trace_plotly <- function(
+  data,
+  thresholds = default_cgm_thresholds(),
+  participant_id = NULL,
+  time_window = default_time_window(),
+  max_points_per_participant = Inf
+) {
+  if (!is.null(participant_id) && nzchar(participant_id)) {
+    data <- data[data$id == participant_id, , drop = FALSE]
+  }
+  time_window <- normalize_time_window(time_window)
+  data <- filter_time_window_data(data, time_window)
+  data <- data[is_finite_cgm_timestamp(data$timestamp) & !is.na(data$glucose), , drop = FALSE]
+  data <- prepare_plot_display_data(data, max_points_per_participant = max_points_per_participant)
+  if (!nrow(data)) {
+    return(plotly_empty_plot(plot_empty_message("trace")))
+  }
+  data <- ensure_plot_imputed_flag(data)
+  data$plot_group <- if (identical(time_window, "full_day")) {
+    as.character(data$id)
+  } else {
+    interaction(data$id, as.Date(data$timestamp), drop = TRUE, lex.order = TRUE)
+  }
+  data$Tooltip <- trace_hover_text(data)
+  palette <- clinical_discrete_palette(data$id)
+  shown_ids <- character()
+  plot <- plotly::plot_ly()
+  for (group_name in unique(as.character(data$plot_group))) {
+    group_data <- data[as.character(data$plot_group) == group_name, , drop = FALSE]
+    id <- as.character(group_data$id[[1L]])
+    show_legend <- !id %in% shown_ids
+    shown_ids <- unique(c(shown_ids, id))
+    plot <- plotly::add_trace(
+      plot,
+      data = group_data,
+      x = ~timestamp,
+      y = ~glucose,
+      type = "scatter",
+      mode = "lines",
+      line = list(color = unname(palette[[id]]), width = 1),
+      name = id,
+      legendgroup = id,
+      showlegend = show_legend,
+      text = ~Tooltip,
+      hoverinfo = "text"
+    )
+  }
+  imputed <- data[data$imputed_flag %in% TRUE, , drop = FALSE]
+  if (nrow(imputed)) {
+    plot <- plotly::add_trace(
+      plot,
+      data = imputed,
+      x = ~timestamp,
+      y = ~glucose,
+      type = "scatter",
+      mode = "markers",
+      marker = list(color = "#C95142", size = 6),
+      name = "Imputed",
+      text = ~Tooltip,
+      hoverinfo = "text"
+    )
+  }
+  plot <- plotly::layout(
+    plot,
+    xaxis = list(title = ""),
+    yaxis = list(title = "Glucose (mg/dL)"),
+    shapes = plotly_threshold_shapes(thresholds),
+    legend = list(orientation = "h", x = 0, y = -0.18),
+    margin = list(t = 24, r = 24, b = 86, l = 64)
+  )
+  maybe_to_webgl(plot, nrow(data))
+}
+
+create_daily_overlay_plotly <- function(
+  data,
+  thresholds = default_cgm_thresholds(),
+  participant = "",
+  group = "",
+  day = "",
+  time_window = default_time_window(),
+  max_points_per_participant = Inf,
+  date_legend_limit = daily_overlay_date_legend_limit()
+) {
+  day <- normalize_plot_days(day)
+  plot_data <- prepare_time_of_day_plot_data(
+    data,
+    participant = participant,
+    group = group,
+    day = day,
+    time_window = time_window,
+    max_points_per_participant = max_points_per_participant
+  )
+  if (!nrow(plot_data)) {
+    return(plotly_empty_plot(plot_empty_message("daily_overlay")))
+  }
+  show_date_legend <- daily_overlay_legend_visible(length(unique(plot_data$date)), date_legend_limit)
+  palette <- clinical_discrete_palette(plot_data$date)
+  shown_dates <- character()
+  plot <- plotly::plot_ly()
+  for (group_name in unique(as.character(plot_data$plot_group))) {
+    group_data <- plot_data[as.character(plot_data$plot_group) == group_name, , drop = FALSE]
+    date <- as.character(group_data$date[[1L]])
+    show_legend <- show_date_legend && !date %in% shown_dates
+    shown_dates <- unique(c(shown_dates, date))
+    plot <- plotly::add_trace(
+      plot,
+      data = group_data,
+      x = ~time_minutes,
+      y = ~glucose,
+      type = "scatter",
+      mode = "lines",
+      line = list(color = unname(palette[[date]]), width = 1),
+      name = date,
+      legendgroup = date,
+      showlegend = show_legend,
+      text = ~Tooltip,
+      hoverinfo = "text"
+    )
+  }
+  imputed <- plot_data[plot_data$imputed_flag %in% TRUE, , drop = FALSE]
+  if (nrow(imputed)) {
+    plot <- plotly::add_trace(
+      plot,
+      data = imputed,
+      x = ~time_minutes,
+      y = ~glucose,
+      type = "scatter",
+      mode = "markers",
+      marker = list(color = "#C95142", size = 6),
+      name = "Imputed",
+      text = ~Tooltip,
+      hoverinfo = "text"
+    )
+  }
+  plot <- plotly::layout(
+    plot,
+    xaxis = list(
+      title = "Time of day",
+      tickvals = seq(0, 1440, by = 240),
+      ticktext = c("00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "24:00"),
+      range = c(0, 1440)
+    ),
+    yaxis = list(title = "Glucose (mg/dL)"),
+    shapes = plotly_threshold_shapes(thresholds),
+    legend = list(orientation = "h", x = 0, y = -0.18),
+    margin = list(t = 24, r = 24, b = 86, l = 64)
+  )
+  maybe_to_webgl(plot, nrow(plot_data))
 }
 
 prepare_agp_summary_data <- function(

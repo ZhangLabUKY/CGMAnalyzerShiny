@@ -468,7 +468,15 @@ qc_module_ui <- function(id) {
   )
 }
 
-qc_module_server <- function(id, standardized, analysis_data, settings, active_tab = NULL) {
+qc_module_server <- function(
+  id,
+  standardized,
+  analysis_data,
+  settings,
+  active_tab = NULL,
+  standardized_missingness_precompute = NULL,
+  analysis_missingness_precompute = NULL
+) {
   shiny::moduleServer(id, function(input, output, session) {
     show_all_imputation_warnings <- shiny::reactiveVal(FALSE)
     shiny::observeEvent(input$toggle_imputation_warnings, {
@@ -490,35 +498,53 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
     cache = "session"
     )
 
-    standardized_missingness <- shiny::bindCache(shiny::reactive({
-      req_active_tab(active_tab, "quality")
-      cgm_timed(
-        "quality_standardized_missingness_precompute",
-        missingness_precompute(
-          standardized(),
-          interval_minutes = settings()$imputation_interval_minutes %||% 5L
+    standardized_missingness <- if (is.function(standardized_missingness_precompute)) {
+      standardized_missingness_precompute
+    } else {
+      shiny::bindCache(shiny::reactive({
+        req_active_tab(active_tab, "quality")
+        data <- standardized()
+        result <- cgm_timed(
+          "quality_standardized_missingness_precompute",
+          cgm_suppress_non_cgma_messages(
+            missingness_precompute(
+              data,
+              interval_minutes = settings()$imputation_interval_minutes %||% 5L
+            )
+          )
         )
+        cgm_maybe_gc(nrow(data))
+        result
+      }),
+      cgm_data_signature(standardized()),
+      settings()$imputation_interval_minutes,
+      cache = "session"
       )
-    }),
-    cgm_data_signature(standardized()),
-    settings()$imputation_interval_minutes,
-    cache = "session"
-    )
+    }
 
-    analysis_missingness <- shiny::bindCache(shiny::reactive({
-      req_active_tab(active_tab, "quality")
-      cgm_timed(
-        "quality_analysis_missingness_precompute",
-        missingness_precompute(
-          analysis_data(),
-          interval_minutes = settings()$imputation_interval_minutes %||% 5L
+    analysis_missingness <- if (is.function(analysis_missingness_precompute)) {
+      analysis_missingness_precompute
+    } else {
+      shiny::bindCache(shiny::reactive({
+        req_active_tab(active_tab, "quality")
+        data <- analysis_data()
+        result <- cgm_timed(
+          "quality_analysis_missingness_precompute",
+          cgm_suppress_non_cgma_messages(
+            missingness_precompute(
+              data,
+              interval_minutes = settings()$imputation_interval_minutes %||% 5L
+            )
+          )
         )
+        cgm_maybe_gc(nrow(data))
+        result
+      }),
+      cgm_data_signature(analysis_data()),
+      settings()$imputation_interval_minutes,
+      cache = "session"
       )
-    }),
-    cgm_data_signature(analysis_data()),
-    settings()$imputation_interval_minutes,
-    cache = "session"
-    )
+    }
 
     missingness_comparison <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "quality")
@@ -649,12 +675,17 @@ qc_module_server <- function(id, standardized, analysis_data, settings, active_t
       if (!subject_id_filter_available(data)) {
         return(NULL)
       }
-      choices <- filter_select_choices(sort(subject_id_values(data)), all_label = "All")
+      ids <- sort(subject_id_values(data))
+      choices <- subject_filter_choices(ids, all_label = "All")
       shiny::selectInput(
         session$ns("missingness_participant"),
         "Subject ID",
         choices = choices,
-        selected = preserve_filter_selection(input$missingness_participant, choices)
+        selected = preserve_subject_filter_selection(
+          input$missingness_participant,
+          choices,
+          ids
+        )
       )
     })
 

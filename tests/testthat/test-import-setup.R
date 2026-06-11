@@ -107,7 +107,7 @@ test_that("multiple uploaded files support per-file header rows", {
 
   expect_equal(nrow(combined), 2L)
   expect_equal(combined$.source_id, c("A", "B"))
-  expect_equal(combined$glucose, c("100", "120"))
+  expect_equal(as.character(combined$glucose), c("100", "120"))
 })
 
 test_that("invalid first reading row normalizes to after the header", {

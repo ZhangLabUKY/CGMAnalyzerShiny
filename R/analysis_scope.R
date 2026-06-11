@@ -3,6 +3,18 @@ available_analysis_date_range <- function(data) {
     return(c(start = NA_character_, end = NA_character_))
   }
 
+  signature <- cgm_data_signature(data)
+  if (
+    is.list(signature) &&
+      is.finite(signature$first_timestamp %||% NA_real_) &&
+      is.finite(signature$last_timestamp %||% NA_real_)
+  ) {
+    return(c(
+      start = as.character(as.Date(as.POSIXct(signature$first_timestamp, origin = "1970-01-01", tz = "UTC"))),
+      end = as.character(as.Date(as.POSIXct(signature$last_timestamp, origin = "1970-01-01", tz = "UTC")))
+    ))
+  }
+
   dates <- as.Date(data$timestamp[is_finite_cgm_timestamp(data$timestamp)])
   dates <- dates[!is.na(dates)]
   if (!length(dates)) {
@@ -48,6 +60,16 @@ filter_analysis_date_range <- function(data, date_range = NULL) {
   start <- as.Date(range[["start"]])
   end <- as.Date(range[["end"]])
   if (is.na(start) && is.na(end)) {
+    return(data)
+  }
+
+  available <- available_analysis_date_range(data)
+  if (
+    !is.na(start) &&
+      !is.na(end) &&
+      identical(as.character(start), as.character(available[["start"]])) &&
+      identical(as.character(end), as.character(available[["end"]]))
+  ) {
     return(data)
   }
 

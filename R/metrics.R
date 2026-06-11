@@ -61,13 +61,10 @@ attach_metric_subject_metadata <- function(metrics, data) {
   }
 
   metrics$.metric_row_order <- seq_len(nrow(metrics))
-  out <- merge(
-    metrics,
-    metadata[, c("id", metadata_cols), drop = FALSE],
-    by = "id",
-    all.x = TRUE,
-    sort = FALSE
-  )
+  out_dt <- data.table::as.data.table(metrics)
+  metadata_dt <- data.table::as.data.table(metadata[, c("id", metadata_cols), drop = FALSE])
+  out_dt[metadata_dt, (metadata_cols) := mget(paste0("i.", metadata_cols)), on = "id"]
+  out <- as.data.frame(out_dt, stringsAsFactors = FALSE)
   out <- out[order(out$.metric_row_order), , drop = FALSE]
   out$.metric_row_order <- NULL
   row.names(out) <- NULL

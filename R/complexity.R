@@ -1055,30 +1055,43 @@ compute_complexity_mse_curves <- function(
   out
 }
 
-filter_complexity_data <- function(data, subject = "", group = "") {
+filter_complexity_data <- function(
+  data,
+  subject = "",
+  group = ""
+) {
   if (!is.data.frame(data) || !nrow(data)) {
     return(data)
   }
   group <- normalize_filter_value(group)
-  subject <- normalize_filter_value(subject)
   if (nzchar(group) && "group" %in% names(data)) {
     data <- data[as.character(data$group) == group, , drop = FALSE]
   }
-  if (nzchar(subject) && "id" %in% names(data)) {
-    data <- data[as.character(data$id) == subject, , drop = FALSE]
-  }
-  data
+  filter_data_by_subject_selection(data, subject)
 }
 
-complexity_filtered_subject_ids <- function(data, subject = "", group = "") {
+complexity_filtered_subject_ids <- function(
+  data,
+  subject = "",
+  group = ""
+) {
   if (!is.data.frame(data) || !"id" %in% names(data)) {
     return(character())
   }
-  data <- filter_complexity_data(data, subject = subject, group = group)
+  data <- filter_complexity_data(
+    data,
+    subject = subject,
+    group = group
+  )
   subject_id_values(data)
 }
 
-filter_complexity_results <- function(results, data = NULL, subject = "", group = "") {
+filter_complexity_results <- function(
+  results,
+  data = NULL,
+  subject = "",
+  group = ""
+) {
   if (!is.data.frame(results) || !nrow(results) || !"id" %in% names(results)) {
     return(results)
   }
@@ -1087,14 +1100,23 @@ filter_complexity_results <- function(results, data = NULL, subject = "", group 
   if (!nzchar(subject) && !nzchar(group)) {
     return(results)
   }
-  ids <- complexity_filtered_subject_ids(data, subject = subject, group = group)
+  ids <- complexity_filtered_subject_ids(
+    data,
+    subject = subject,
+    group = group
+  )
   if (!length(ids)) {
     return(results[0L, , drop = FALSE])
   }
   results[as.character(results$id) %in% ids, , drop = FALSE]
 }
 
-filter_complexity_curves <- function(curves, data = NULL, subject = "", group = "") {
+filter_complexity_curves <- function(
+  curves,
+  data = NULL,
+  subject = "",
+  group = ""
+) {
   if (!is.data.frame(curves) || !nrow(curves) || !"id" %in% names(curves)) {
     return(curves)
   }
@@ -1103,7 +1125,11 @@ filter_complexity_curves <- function(curves, data = NULL, subject = "", group = 
   if (!nzchar(subject) && !nzchar(group)) {
     return(curves)
   }
-  ids <- complexity_filtered_subject_ids(data, subject = subject, group = group)
+  ids <- complexity_filtered_subject_ids(
+    data,
+    subject = subject,
+    group = group
+  )
   if (!length(ids)) {
     return(curves[0L, , drop = FALSE])
   }

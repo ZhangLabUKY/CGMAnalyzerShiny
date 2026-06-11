@@ -448,3 +448,61 @@ test_that("quality module returns QC summaries for the active Quality tab", {
     }
   )
 })
+
+test_that("quality module reuses supplied missingness precompute reactives", {
+  data <- data.frame(
+    id = c("A", "A", "A", "B"),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 08:00:00",
+      "2026-05-05 08:05:00",
+      "2026-05-05 08:30:00",
+      "2026-05-06 08:00:00"
+    )),
+    glucose = c(100, NA, 120, 130),
+    units = "mg/dL",
+    device = NA_character_,
+    group = c("Control", "Control", "Control", "Treatment"),
+    source_file = c("A.csv", "A.csv", "A.csv", "B.csv"),
+    imputed_flag = FALSE,
+    id_source = subject_id_source_mapped(),
+    stringsAsFactors = FALSE
+  )
+  settings <- create_reproducibility_settings(
+    valid_day_hours = 1,
+    analysis_date_range = c(start = as.Date("2026-05-05"), end = as.Date("2026-05-06")),
+    imputation_method = "none"
+  )
+  analysis_calls <- 0L
+  standardized_calls <- 0L
+  analysis_precompute <- shiny::reactive({
+    analysis_calls <<- analysis_calls + 1L
+    missingness_precompute(data)
+  })
+  standardized_precompute <- shiny::reactive({
+    standardized_calls <<- standardized_calls + 1L
+    analysis_precompute()
+  })
+
+  shiny::testServer(
+    qc_module_server,
+    args = list(
+      standardized = shiny::reactive(data),
+      analysis_data = shiny::reactive(data),
+      settings = shiny::reactive(settings),
+      active_tab = function() "quality",
+      standardized_missingness_precompute = standardized_precompute,
+      analysis_missingness_precompute = analysis_precompute
+    ),
+    {
+      comparison <- missingness_comparison()
+      gaps <- gap_periods()
+      calendar <- missingness_calendar_all()
+
+      expect_true(nrow(comparison) > 0)
+      expect_true(nrow(gaps) > 0)
+      expect_true(nrow(calendar) > 0)
+      expect_equal(analysis_calls, 1L)
+      expect_equal(standardized_calls, 1L)
+    }
+  )
+})

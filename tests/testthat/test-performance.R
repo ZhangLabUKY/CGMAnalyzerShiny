@@ -49,6 +49,39 @@ test_that("performance timing is disabled by default and can write logs when ena
   expect_true(grepl("error_message=boom", error_row$context, fixed = TRUE))
 })
 
+test_that("non-CGMA diagnostic messages can be suppressed without hiding performance logs", {
+  expect_silent(cgm_suppress_non_cgma_messages(message("external gap diagnostic")))
+  expect_message(
+    cgm_suppress_non_cgma_messages(message("[CGMA perf] kept")),
+    "\\[CGMA perf\\] kept"
+  )
+})
+
+test_that("background workers reuse an existing matching plan", {
+  old_generation <- background_worker_state$generation
+  old_configured <- background_worker_state$configured
+  old_workers <- background_worker_state$workers
+  on.exit({
+    background_worker_state$generation <- old_generation
+    background_worker_state$configured <- old_configured
+    background_worker_state$workers <- old_workers
+  }, add = TRUE)
+
+  background_worker_state$generation <- 0L
+  background_worker_state$configured <- FALSE
+  background_worker_state$workers <- NULL
+  calls <- 0L
+  fake_plan <- function(...) {
+    calls <<- calls + 1L
+  }
+
+  first <- configure_background_workers(workers = 2L, plan_fn = fake_plan)
+  second <- configure_background_workers(workers = 2L, plan_fn = fake_plan)
+
+  expect_gt(second, first)
+  expect_equal(calls, 1L)
+})
+
 test_that("data.table base metrics match legacy one-group summary", {
   data <- data.frame(
     id = rep("A", 4),

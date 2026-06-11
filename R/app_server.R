@@ -7,27 +7,93 @@ app_server <- function(input, output, session) {
   active_tab <- shiny::reactive(input$active_tab %||% default_active_tab())
   uploaded <- upload_module_server("upload")
   mapping <- column_mapping_module_server("column_mapping", uploaded)
+  shared_missingness <- new.env(parent = emptyenv())
 
-  standardized <- shiny::reactive({
+  standardization_cache_signature <- function(upload, map) {
+    datapaths <- upload$datapaths %||% character()
+    file_info <- if (length(datapaths)) {
+      info <- file.info(datapaths)
+      data.frame(
+        path = normalizePath(datapaths, winslash = "/", mustWork = FALSE),
+        size = info$size,
+        mtime = as.numeric(info$mtime),
+        stringsAsFactors = FALSE
+      )
+    } else {
+      NULL
+    }
+    list(
+      files = upload$files,
+      file_info = file_info,
+      row_boundaries = upload$row_boundaries,
+      upload_mode = upload$upload_mode %||% "single_file",
+      mapping = map[c(required_cgm_columns(), optional_cgm_columns(), "source_units", "timestamp_parser")]
+    )
+  }
+
+  standardization_input_data <- shiny::reactive({
     upload <- uploaded()
     map <- mapping()
     shiny::req(upload$data)
     shiny::req(map$timestamp, map$glucose)
 
-    cgm_timed(
-      "standardization",
-      standardize_cgm_data(
-        upload$data,
-        mapping = map,
-        units = map$source_units,
-        tz = "UTC",
-        upload_mode = upload$upload_mode %||% "single_file"
-      ),
-      context = list(upload_mode = upload$upload_mode %||% "single_file")
-    )
+    if (isTRUE(upload$sampled) && length(upload$datapaths %||% character())) {
+      return(cgm_timed(
+        "standardization_selected_column_read",
+        combine_uploaded_files(
+          upload$datapaths,
+          upload$files,
+          header_rows = upload$row_boundaries$header_row,
+          first_data_rows = upload$row_boundaries$first_data_row,
+          select_columns = selected_upload_columns(map, upload_mode = upload$upload_mode %||% "single_file")
+        ),
+        context = list(upload_mode = upload$upload_mode %||% "single_file")
+      ))
+    }
+
+    upload$data
   })
 
-  settings <- preprocessing_module_server("preprocessing", mapping, standardized)
+  standardized <- shiny::bindCache(shiny::reactive({
+    upload <- uploaded()
+    map <- mapping()
+    shiny::req(upload$data)
+    shiny::req(map$timestamp, map$glucose)
+    shiny::withProgress(
+      message = "Preparing CGM data",
+      detail = "Reading selected columns...",
+      value = 0,
+      {
+        data <- standardization_input_data()
+        shiny::incProgress(0.35, detail = "Parsing timestamps and glucose values...")
+        result <- cgm_timed(
+          "standardization",
+          standardize_cgm_data(
+            data,
+            mapping = map,
+            units = map$source_units,
+            tz = "UTC",
+            timestamp_parser = map$timestamp_parser %||% "compatibility",
+            upload_mode = upload$upload_mode %||% "single_file"
+          ),
+          context = list(
+            upload_mode = upload$upload_mode %||% "single_file",
+            timestamp_parser = map$timestamp_parser %||% "compatibility"
+          )
+        )
+        shiny::incProgress(0.55, detail = "Finalizing standardized data...")
+        row_count <- nrow(data)
+        rm(data)
+        cgm_maybe_gc(row_count)
+        result
+      }
+    )
+  }),
+  standardization_cache_signature(uploaded(), mapping()),
+  cache = "session"
+  )
+
+  settings <- preprocessing_module_server("preprocessing", mapping, standardized, shared_missingness = shared_missingness)
   imputation_run <- attr(settings, "imputation_run", exact = TRUE) %||% shiny::reactive(0L)
   set_imputation_status <- attr(settings, "set_imputation_status", exact = TRUE) %||% function(status) invisible(NULL)
 
@@ -79,12 +145,22 @@ app_server <- function(input, output, session) {
       error = function(error) NULL
     )
     standardized_result <- safe_standardized()
+    missingness_review <- tryCatch(
+      if (is.function(shared_missingness$analysis_missingness_review)) {
+        shared_missingness$analysis_missingness_review()
+      } else {
+        NULL
+      },
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
+    )
     data_status_strip_ui(
       upload = upload,
       mapping = map,
       standardized_data = standardized_result$data,
       standardization_error = standardized_result$error,
-      settings = safe_settings()
+      settings = safe_settings(),
+      missingness_review = missingness_review
     )
   })
 
@@ -172,11 +248,48 @@ app_server <- function(input, output, session) {
   analysis_input <- shiny::bindCache(shiny::reactive({
     cgm_timed(
       "analysis_date_filter",
-      filter_analysis_date_range(standardized(), settings()$analysis_date_range)
+      attach_cgm_data_signature(
+        filter_analysis_date_range(standardized(), settings()$analysis_date_range)
+      )
     )
   }),
   cgm_data_signature(standardized()),
   analysis_date_range_signature(settings()),
+  cache = "session"
+  )
+
+  shared_missingness$analysis_missingness_review <- shiny::bindCache(shiny::reactive({
+    data <- analysis_input()
+    interval_minutes <- settings()$imputation_interval_minutes %||% 5L
+    shiny::withProgress(
+      message = "Reviewing timestamp gaps...",
+      value = 0.4,
+      {
+        grid <- cgm_timed(
+          "data_missingness_review_fast",
+          cgm_suppress_non_cgma_messages(
+            fast_missingness_grid_summary_by_id(
+              data,
+              interval_minutes = interval_minutes
+            )
+          )
+        )
+        cgm_timed(
+          "data_imputation_candidate_summary_fast",
+          cgm_suppress_non_cgma_messages(
+            imputation_missingness_summary(
+              data,
+              interval_minutes = interval_minutes,
+              precomputed = grid,
+              include_timestamp_gaps = TRUE
+            )
+          )
+        )
+      }
+    )
+  }),
+  cgm_data_signature(analysis_input()),
+  settings()$imputation_interval_minutes,
   cache = "session"
   )
 
@@ -243,14 +356,20 @@ app_server <- function(input, output, session) {
     set_imputation_status(list(state = "running", message = imputation_status_message("running")))
     interval_minutes <- current_settings$imputation_interval_minutes %||% 5L
     precomputed <- tryCatch(
-      cgm_timed(
-        "analysis_data_imputation_precompute",
-        missingness_precompute(data, interval_minutes = interval_minutes),
-        context = list(method = method)
-      ),
+      {
+        value <- cgm_timed(
+          "analysis_data_imputation_precompute",
+          cgm_suppress_non_cgma_messages(
+            missingness_precompute(data, interval_minutes = interval_minutes)
+          ),
+          context = list(method = method)
+        )
+        cgm_maybe_gc(nrow(data))
+        value
+      },
       error = function(error) NULL
     )
-    result <- apply_imputation_settings(data, current_settings, precomputed = precomputed)
+    result <- attach_cgm_data_signature(apply_imputation_settings(data, current_settings, precomputed = precomputed))
     error_message <- attr(result, "imputation_error", exact = TRUE)
     if (!is.null(error_message) && nzchar(error_message)) {
       set_imputation_status(list(state = "failed", message = imputation_status_message("failed", error_message)))
@@ -273,7 +392,7 @@ app_server <- function(input, output, session) {
     cgm_timed(
       "analysis_data_select",
       {
-        if (!identical(method, "mice_only")) {
+        out <- if (!identical(method, "mice_only")) {
           data
         } else {
           signature <- imputation_request_signature(data, current_settings)
@@ -285,12 +404,69 @@ app_server <- function(input, output, session) {
             data
           }
         }
+        attach_cgm_data_signature(out)
       },
       context = list(method = method)
     )
   })
 
-  qc_summary <- qc_module_server("qc", analysis_input, analysis_data, settings, active_tab)
+  shared_missingness$analysis_missingness_precompute <- shiny::bindCache(shiny::reactive({
+    req_active_tab(active_tab, "quality")
+    data <- analysis_data()
+    result <- cgm_timed(
+      "quality_analysis_missingness_precompute",
+      cgm_suppress_non_cgma_messages(
+        missingness_precompute(
+          data,
+          interval_minutes = settings()$imputation_interval_minutes %||% 5L
+        )
+      )
+    )
+    cgm_maybe_gc(nrow(data))
+    result
+  }),
+  cgm_data_signature(analysis_data()),
+  settings()$imputation_interval_minutes,
+  cache = "session"
+  )
+
+  shared_missingness$standardized_missingness_precompute <- shiny::bindCache(shiny::reactive({
+    req_active_tab(active_tab, "quality")
+    if (
+      !should_show_analysis_missingness(settings()) &&
+        identical(cgm_data_signature(analysis_input()), cgm_data_signature(analysis_data()))
+    ) {
+      return(shared_missingness$analysis_missingness_precompute())
+    }
+    data <- analysis_input()
+    result <- cgm_timed(
+      "quality_standardized_missingness_precompute",
+      cgm_suppress_non_cgma_messages(
+        missingness_precompute(
+          data,
+          interval_minutes = settings()$imputation_interval_minutes %||% 5L
+        )
+      )
+    )
+    cgm_maybe_gc(nrow(data))
+    result
+  }),
+  cgm_data_signature(analysis_input()),
+  cgm_data_signature(analysis_data()),
+  settings()$imputation_interval_minutes,
+  should_show_analysis_missingness(settings()),
+  cache = "session"
+  )
+
+  qc_summary <- qc_module_server(
+    "qc",
+    analysis_input,
+    analysis_data,
+    settings,
+    active_tab,
+    standardized_missingness_precompute = shared_missingness$standardized_missingness_precompute,
+    analysis_missingness_precompute = shared_missingness$analysis_missingness_precompute
+  )
   metrics <- metrics_module_server("metrics", analysis_data, settings, active_tab)
 
   plots_module_server("plots", analysis_data, metrics, settings, active_tab)

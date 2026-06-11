@@ -283,6 +283,7 @@ column_mapping_module_server <- function(id, uploaded) {
         device = "",
         subject_metadata = clean_subject_metadata(subject_metadata()),
         source_units = input$source_units,
+        timestamp_parser = "compatibility",
         upload_mode = upload_mode
       )
     })

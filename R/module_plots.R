@@ -100,12 +100,17 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
       if (!subject_id_filter_available(data)) {
         return(NULL)
       }
-      choices <- plot_subject_filter_choices(data)
+      ids <- sort(subject_id_values(data))
+      choices <- subject_filter_choices(ids, all_label = "All")
       shiny::selectInput(
         session$ns("participant"),
         "Subject ID",
         choices = choices,
-        selected = preserve_filter_selection(input$participant, choices)
+        selected = preserve_subject_filter_selection(
+          input$participant,
+          choices,
+          ids
+        )
       )
     })
 
@@ -331,6 +336,36 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
     )
 
     output$active_plot <- plotly::renderPlotly({
+      plot_type <- input$plot_type %||% "trace"
+      thresholds <- settings()$thresholds_mg_dl
+      display_context <- plot_display_context()
+      if (identical(plot_type, "trace")) {
+        return(cgm_timed(
+          "plots_trace_native_plotly_render",
+          create_trace_plotly(
+            display_context$filtered,
+            thresholds = thresholds,
+            time_window = normalized_time_window(),
+            max_points_per_participant = display_context$max_points_per_participant
+          ),
+          rows = nrow(display_context$filtered)
+        ))
+      }
+      if (identical(plot_type, "daily_overlay")) {
+        return(cgm_timed(
+          "plots_daily_overlay_native_plotly_render",
+          create_daily_overlay_plotly(
+            standardized(),
+            thresholds = thresholds,
+            participant = input$participant,
+            group = input$group,
+            day = normalized_day(),
+            time_window = normalized_time_window(),
+            max_points_per_participant = display_context$max_points_per_participant
+          ),
+          rows = nrow(display_context$filtered)
+        ))
+      }
       plotly_plot <- cgm_timed("plots_ggplotly_render", plotly::ggplotly(active_plot(), tooltip = "text"))
       if (identical(input$plot_type, "agp")) {
         plotly_plot <- cgm_timed("plots_agp_layout", layout_agp_plotly(plotly_plot))

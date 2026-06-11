@@ -103,7 +103,11 @@ regularize_subject_timestamp_grid <- function(subject_data, interval_minutes) {
     timestamp = seq(min(subject_data$timestamp), max(subject_data$timestamp), by = paste(interval_minutes, "mins")),
     stringsAsFactors = FALSE
   )
-  expanded <- merge(grid, subject_data, by = c("id", "timestamp"), all.x = TRUE, sort = FALSE)
+  expanded_dt <- data.table::as.data.table(subject_data)[
+    data.table::as.data.table(grid),
+    on = .(id, timestamp)
+  ]
+  expanded <- as.data.frame(expanded_dt, stringsAsFactors = FALSE)
   inserted <- is.na(expanded$.original_order)
   expanded$inserted_timestamp_gap <- expanded$inserted_timestamp_gap %in% TRUE
   expanded$explicit_missing_glucose <- expanded$explicit_missing_glucose %in% TRUE
@@ -167,7 +171,7 @@ regularize_cgm_timestamp_grid <- function(data, interval_minutes = 5L) {
   grid <- dt[, list(
     timestamp = seq(min(timestamp), max(timestamp), by = interval_minutes * 60)
   ), by = id]
-  expanded_dt <- merge(grid, dt, by = c("id", "timestamp"), all.x = TRUE, sort = FALSE)
+  expanded_dt <- dt[grid, on = .(id, timestamp)]
   inserted <- is.na(expanded_dt$.original_order)
   expanded_dt[, inserted_timestamp_gap := inserted_timestamp_gap %in% TRUE]
   expanded_dt[, explicit_missing_glucose := explicit_missing_glucose %in% TRUE]
@@ -211,11 +215,15 @@ regularize_cgm_timestamp_grid <- function(data, interval_minutes = 5L) {
   if ("units" %in% names(expanded_dt)) {
     expanded_dt[is.na(units), units := "mg/dL"]
   }
-  expanded <- as.data.frame(expanded_dt, stringsAsFactors = FALSE)
   remainder <- out[!finite, , drop = FALSE]
-  combined <- rbind(expanded, remainder)
-  combined <- combined[order(combined$id, combined$timestamp, combined$.original_order), , drop = FALSE]
-  combined$.original_order <- NULL
+  combined <- data.table::rbindlist(
+    list(expanded_dt, data.table::as.data.table(remainder)),
+    use.names = TRUE,
+    fill = TRUE
+  )
+  data.table::setorder(combined, id, timestamp, .original_order)
+  combined[, .original_order := NULL]
+  data.table::setDF(combined)
   row.names(combined) <- NULL
   combined
 }
@@ -254,6 +262,104 @@ missingness_grid_summary_from_expanded <- function(expanded) {
   out
 }
 
+fast_missingness_grid_summary_by_id <- function(data, interval_minutes = 5L) {
+  if (!is.data.frame(data) || !nrow(data) || !all(c("id", "timestamp", "glucose") %in% names(data))) {
+    return(empty_missingness_grid_summary())
+  }
+  interval_minutes <- normalize_interval_minutes(interval_minutes)
+  out <- ensure_missingness_source_columns(data)
+  out$.original_order <- seq_len(nrow(out))
+  dt <- data.table::as.data.table(out)
+  dt[, id := as.character(id)]
+  finite <- !is.na(dt$id) & nzchar(dt$id) & is_finite_cgm_timestamp(dt$timestamp)
+
+  summarize_retained <- function(x) {
+    if (!nrow(x)) {
+      return(empty_missingness_grid_summary())
+    }
+    x[, {
+      explicit <- (get("missing_source") == missing_source_explicit()) |
+        (get("explicit_missing_glucose") %in% TRUE)
+      existing_gaps <- (get("missing_source") == missing_source_gap()) |
+        (get("inserted_timestamp_gap") %in% TRUE)
+      missing <- is.na(get("glucose"))
+      list(
+        expanded_rows = .N,
+        explicit_missing_glucose = sum(explicit, na.rm = TRUE),
+        estimated_missing_readings = sum(existing_gaps, na.rm = TRUE),
+        missing_glucose = sum(missing, na.rm = TRUE),
+        missing_glucose_rate = if (.N > 0L) round(100 * sum(missing, na.rm = TRUE) / .N, 2) else NA_real_
+      )
+    }, by = id]
+  }
+
+  finite_summary <- empty_missingness_grid_summary()
+  if (any(finite)) {
+    finite_dt <- data.table::copy(dt[finite])
+    data.table::setorder(finite_dt, id, timestamp, .original_order)
+    finite_dt[, .anchor_timestamp := min(timestamp, na.rm = TRUE), by = id]
+    finite_dt[, timestamp := .anchor_timestamp +
+      round(as.numeric(difftime(timestamp, .anchor_timestamp, units = "mins")) / interval_minutes) *
+        interval_minutes * 60]
+    finite_dt[, .anchor_timestamp := NULL]
+    finite_dt[, .missing_sort := is.na(glucose)]
+    data.table::setorder(finite_dt, id, timestamp, .missing_sort, .original_order)
+    finite_dt[, .missing_sort := NULL]
+    finite_dt <- finite_dt[!duplicated(finite_dt, by = c("id", "timestamp"))]
+    data.table::setorder(finite_dt, id, timestamp, .original_order)
+    finite_dt[, .previous_timestamp := data.table::shift(timestamp), by = id]
+    finite_dt[, .inferred_gap_readings := data.table::fifelse(
+      is.na(.previous_timestamp),
+      0L,
+      pmax(
+        as.integer(round(as.numeric(difftime(timestamp, .previous_timestamp, units = "mins")) / interval_minutes)) - 1L,
+        0L
+      )
+    )]
+    finite_summary <- finite_dt[, {
+      explicit <- (get("missing_source") == missing_source_explicit()) |
+        (get("explicit_missing_glucose") %in% TRUE)
+      existing_gaps <- (get("missing_source") == missing_source_gap()) |
+        (get("inserted_timestamp_gap") %in% TRUE)
+      missing <- is.na(get("glucose"))
+      inferred <- sum(.inferred_gap_readings, na.rm = TRUE)
+      missing_count <- sum(missing, na.rm = TRUE) + inferred
+      expanded_count <- .N + inferred
+      list(
+        expanded_rows = expanded_count,
+        explicit_missing_glucose = sum(explicit, na.rm = TRUE),
+        estimated_missing_readings = sum(existing_gaps, na.rm = TRUE) + inferred,
+        missing_glucose = missing_count,
+        missing_glucose_rate = if (expanded_count > 0L) round(100 * missing_count / expanded_count, 2) else NA_real_
+      )
+    }, by = id]
+  }
+
+  remainder_summary <- summarize_retained(dt[!finite])
+  combined <- data.table::rbindlist(
+    list(data.table::as.data.table(finite_summary), data.table::as.data.table(remainder_summary)),
+    use.names = TRUE,
+    fill = TRUE
+  )
+  if (!nrow(combined)) {
+    return(empty_missingness_grid_summary())
+  }
+  combined <- combined[, {
+    expanded <- sum(expanded_rows, na.rm = TRUE)
+    missing <- sum(missing_glucose, na.rm = TRUE)
+    list(
+      expanded_rows = expanded,
+      explicit_missing_glucose = sum(explicit_missing_glucose, na.rm = TRUE),
+      estimated_missing_readings = sum(estimated_missing_readings, na.rm = TRUE),
+      missing_glucose = missing,
+      missing_glucose_rate = if (expanded > 0L) round(100 * missing / expanded, 2) else NA_real_
+    )
+  }, by = id]
+  out <- as.data.frame(combined, stringsAsFactors = FALSE)
+  row.names(out) <- NULL
+  out
+}
+
 gap_periods_from_expanded <- function(expanded, interval_minutes = 5L) {
   interval_minutes <- normalize_interval_minutes(interval_minutes)
   gap_rows <- expanded[
@@ -267,7 +373,12 @@ gap_periods_from_expanded <- function(expanded, interval_minutes = 5L) {
 
   dt <- data.table::as.data.table(gap_rows)
   data.table::setorder(dt, id, timestamp)
-  dt[, gap_group := cumsum(c(TRUE, as.numeric(diff(timestamp), units = "mins") > interval_minutes)), by = id]
+  dt[, .previous_timestamp := data.table::shift(timestamp), by = id]
+  dt[, gap_group := cumsum(
+    is.na(.previous_timestamp) |
+      as.numeric(difftime(timestamp, .previous_timestamp, units = "mins")) > interval_minutes
+  ), by = id]
+  dt[, .previous_timestamp := NULL]
   out <- dt[, list(
     gap_start = min(timestamp),
     gap_end = max(timestamp),
@@ -283,9 +394,21 @@ gap_periods_from_expanded <- function(expanded, interval_minutes = 5L) {
 
 missingness_precompute <- function(data, interval_minutes = 5L) {
   interval_minutes <- normalize_interval_minutes(interval_minutes)
-  expanded <- regularize_cgm_timestamp_grid(data, interval_minutes = interval_minutes)
-  grid_summary <- missingness_grid_summary_from_expanded(expanded)
-  gaps <- gap_periods_from_expanded(expanded, interval_minutes = interval_minutes)
+  expanded <- cgm_timed(
+    "missingness_regularize_grid",
+    regularize_cgm_timestamp_grid(data, interval_minutes = interval_minutes),
+    rows = nrow(data)
+  )
+  grid_summary <- cgm_timed(
+    "missingness_grid_summary",
+    missingness_grid_summary_from_expanded(expanded),
+    rows = nrow(expanded)
+  )
+  gaps <- cgm_timed(
+    "missingness_gap_grouping",
+    gap_periods_from_expanded(expanded, interval_minutes = interval_minutes),
+    rows = nrow(expanded)
+  )
   structure(
     list(
       interval_minutes = interval_minutes,
@@ -310,6 +433,22 @@ missingness_precompute_or_new <- function(data, interval_minutes = 5L, precomput
 missingness_grid_summary_by_id <- function(data, interval_minutes = 5L, precomputed = NULL) {
   precomputed <- missingness_precompute_or_new(data, interval_minutes = interval_minutes, precomputed = precomputed)
   precomputed$grid_summary
+}
+
+missingness_grid_summary_for_review <- function(data, interval_minutes = 5L, precomputed = NULL) {
+  if (
+    is.data.frame(precomputed) &&
+      all(names(empty_missingness_grid_summary()) %in% names(precomputed))
+  ) {
+    return(precomputed)
+  }
+  if (
+    inherits(precomputed, "cgm_missingness_precompute") &&
+      identical(normalize_interval_minutes(interval_minutes), precomputed$interval_minutes)
+  ) {
+    return(precomputed$grid_summary)
+  }
+  fast_missingness_grid_summary_by_id(data, interval_minutes = interval_minutes)
 }
 
 #' Detect timestamp gaps in standardized CGM data
@@ -429,8 +568,9 @@ compute_missingness_heatmap_data <- function(
       estimated_missing_readings = sum(gap_values, na.rm = TRUE)
     )
   }, by = .(id, date)]
-  daily <- merge(expanded_daily, daily, by = c("id", "date"), all.x = TRUE, sort = FALSE)
-  daily$readings[is.na(daily$readings)] <- 0L
+  expanded_daily[daily, readings := i.readings, on = .(id, date)]
+  daily <- expanded_daily
+  daily[is.na(readings), readings := 0L]
 
   if (is.null(gaps)) {
     gaps <- precomputed$gaps
@@ -441,14 +581,14 @@ compute_missingness_heatmap_data <- function(
     gap_summary <- gap_dt[, list(
       timestamp_gaps = .N
     ), by = .(id, date)]
-    daily <- merge(daily, gap_summary, by = c("id", "date"), all.x = TRUE, sort = FALSE)
+    daily[gap_summary, timestamp_gaps := i.timestamp_gaps, on = .(id, date)]
   } else {
-    daily$timestamp_gaps <- 0L
+    daily[, timestamp_gaps := 0L]
   }
-  daily$timestamp_gaps[is.na(daily$timestamp_gaps)] <- 0L
-  daily$estimated_missing_readings[is.na(daily$estimated_missing_readings)] <- 0L
+  daily[is.na(timestamp_gaps), timestamp_gaps := 0L]
+  daily[is.na(estimated_missing_readings), estimated_missing_readings := 0L]
 
-  daily <- daily[order(id, date)]
+  data.table::setorder(daily, id, date)
   subject_prefix <- if (show_subject_id_for_display(data, show_subject_id)) {
     paste0("Subject ID: ", daily$id, "<br>")
   } else {
@@ -623,14 +763,15 @@ add_compact_calendar_positions <- function(daily, ids) {
   month_width$month_index <- seq_len(nrow(month_width))
   month_width$month_offset <- c(0L, cumsum(utils::head(month_width$week_of_month + 1L, -1L)))
 
-  daily <- merge(daily, week_map, by = c("month_start", "week_start"), all.x = TRUE, sort = FALSE)
-  daily <- merge(
-    daily,
-    month_width[, c("month_start", "month_index", "month_offset"), drop = FALSE],
-    by = "month_start",
-    all.x = TRUE,
-    sort = FALSE
-  )
+  daily_dt <- data.table::as.data.table(daily)
+  week_map_dt <- data.table::as.data.table(week_map)
+  month_width_dt <- data.table::as.data.table(month_width[, c("month_start", "month_index", "month_offset"), drop = FALSE])
+  daily_dt[week_map_dt, week_of_month := i.week_of_month, on = .(month_start, week_start)]
+  daily_dt[month_width_dt, `:=`(
+    month_index = i.month_index,
+    month_offset = i.month_offset
+  ), on = .(month_start)]
+  daily <- as.data.frame(daily_dt, stringsAsFactors = FALSE)
   daily$calendar_x <- daily$month_offset + daily$week_of_month
   daily$week_index <- daily$calendar_x
 
@@ -693,7 +834,13 @@ compute_missingness_calendar_data <- function(
   )
   complete <- expand_subject_active_dates(spans)
   complete$date <- as.Date(complete$date)
-  daily <- merge(complete, daily, by = c("id", "date"), all.x = TRUE, sort = FALSE)
+  daily <- as.data.frame(
+    data.table::as.data.table(daily)[
+      data.table::as.data.table(complete),
+      on = .(id, date)
+    ],
+    stringsAsFactors = FALSE
+  )
   daily$readings[is.na(daily$readings)] <- 0L
   daily$missing_glucose[is.na(daily$missing_glucose)] <- 0L
   daily$timestamp_gaps[is.na(daily$timestamp_gaps)] <- 0L
@@ -765,7 +912,18 @@ append_day_coverage_warnings <- function(missingness, calendar_data, data = NULL
   }
 
   if ("Subject ID" %in% names(missingness) && "Subject ID" %in% names(warnings)) {
-    out <- merge(missingness, warnings, by = "Subject ID", all.x = TRUE, sort = FALSE)
+    out_dt <- data.table::as.data.table(missingness)
+    warning_dt <- data.table::as.data.table(warnings)
+    data.table::setnames(
+      warning_dt,
+      c("Full missing days", "Half-day or worse coverage days"),
+      c(".full_missing_days", ".half_day_missing_days")
+    )
+    out_dt[warning_dt, `:=`(
+      `Full missing days` = i..full_missing_days,
+      `Half-day or worse coverage days` = i..half_day_missing_days
+    ), on = "Subject ID"]
+    out <- as.data.frame(out_dt, stringsAsFactors = FALSE)
   } else {
     out <- missingness
     out[["Full missing days"]] <- sum(warnings[["Full missing days"]], na.rm = TRUE)
@@ -793,12 +951,15 @@ day_coverage_warning_note <- function(day_summary) {
   )
 }
 
-filter_missingness_calendar_participant <- function(calendar_data, participant = "") {
-  participant <- normalize_filter_value(participant)
-  if (nzchar(participant)) {
-    calendar_data <- calendar_data[calendar_data$id == participant, , drop = FALSE]
-  }
-  calendar_data
+filter_missingness_calendar_participant <- function(
+  calendar_data,
+  participant = ""
+) {
+  filter_data_by_subject_selection(
+    calendar_data,
+    participant,
+    id_col = "id"
+  )
 }
 
 filled_glucose_by_id <- function(original_data, analysis_data, ids) {

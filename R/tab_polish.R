@@ -2,6 +2,46 @@ format_count <- function(value) {
   format(value %||% 0L, big.mark = ",", scientific = FALSE, trim = TRUE)
 }
 
+upload_full_dimensions <- function(upload = NULL) {
+  data <- if (is.list(upload)) upload$data else NULL
+  dimensions <- if (is.list(upload)) upload$full_dimensions else NULL
+  sampled <- is.list(upload) && isTRUE(upload$sampled)
+
+  rows <- NA_real_
+  columns <- NA_real_
+
+  if (is.data.frame(dimensions) && "rows" %in% names(dimensions)) {
+    row_values <- suppressWarnings(as.numeric(dimensions$rows))
+    if (!all(is.na(row_values))) {
+      rows <- sum(row_values, na.rm = TRUE)
+    }
+  }
+  if (is.data.frame(dimensions) && "columns" %in% names(dimensions)) {
+    column_values <- suppressWarnings(as.numeric(dimensions$columns))
+    if (!all(is.na(column_values))) {
+      columns <- max(column_values, na.rm = TRUE)
+    }
+  }
+
+  if (is.data.frame(data) && !sampled) {
+    if (is.na(rows)) {
+      rows <- nrow(data)
+    }
+    if (is.na(columns)) {
+      columns <- ncol(data)
+    }
+  }
+
+  list(rows = rows, columns = columns)
+}
+
+upload_dimension_label <- function(value, unit) {
+  if (!length(value) || is.na(value) || !is.finite(value)) {
+    return(paste("unknown", unit))
+  }
+  paste(format_count(value), unit)
+}
+
 format_date_span <- function(timestamp) {
   if (
     is.null(timestamp) ||
@@ -106,7 +146,7 @@ timestamp_validation_summary <- function(
   summary$timestamp_column <- timestamp_col
   failed <- !is.na(trimws(as.character(data[[timestamp_col]]))) &
     nzchar(trimws(as.character(data[[timestamp_col]]))) &
-    is.na(parse_cgm_timestamp(data[[timestamp_col]], tz = tz))
+    is.na(parse_cgm_timestamp(data[[timestamp_col]], tz = tz, timestamp_parser = "compatibility"))
   examples <- unique(as.character(data[[timestamp_col]][failed]))
   summary$example_failed_values <- paste(
     examples[seq_len(min(length(examples), 3L))],
@@ -457,7 +497,12 @@ data_setup_status <- function(
   rows
 }
 
-data_upload_summary <- function(upload = NULL, standardized_data = NULL) {
+data_upload_summary <- function(
+  upload = NULL,
+  standardized_data = NULL,
+  interval_minutes = 5L,
+  missingness_review = NULL
+) {
   upload_data <- if (is.list(upload)) upload$data else NULL
   if (!is.data.frame(upload_data) || !nrow(upload_data)) {
     return(data.frame(
@@ -465,6 +510,16 @@ data_upload_summary <- function(upload = NULL, standardized_data = NULL) {
       Value = character(),
       stringsAsFactors = FALSE
     ))
+  }
+  dimensions <- upload_full_dimensions(upload)
+  row_count <- if (
+    length(dimensions$rows) &&
+      !is.na(dimensions$rows) &&
+      is.finite(dimensions$rows)
+  ) {
+    format_count(dimensions$rows)
+  } else {
+    "Unknown"
   }
 
   subject_count <- if (
@@ -483,9 +538,24 @@ data_upload_summary <- function(upload = NULL, standardized_data = NULL) {
     "Map timestamp to calculate"
   }
   missing_glucose <- if (
+    is.data.frame(missingness_review) &&
+      nrow(missingness_review) &&
+      "missing_glucose" %in% names(missingness_review)
+  ) {
+    sum(missingness_review$missing_glucose, na.rm = TRUE)
+  } else if (
+    is.data.frame(standardized_data) &&
+      all(c("id", "timestamp", "glucose") %in% names(standardized_data)) &&
+      nrow(standardized_data)
+  ) {
+    tryCatch(
+      sum(fast_missingness_grid_summary_by_id(standardized_data, interval_minutes = interval_minutes)$missing_glucose, na.rm = TRUE),
+      error = function(error) NA_integer_
+    )
+  } else if (
     is.data.frame(standardized_data) && "glucose" %in% names(standardized_data)
   ) {
-    sum(is.na(standardized_data$glucose))
+    sum(is.na(standardized_data$glucose), na.rm = TRUE)
   } else {
     NA_integer_
   }
@@ -493,7 +563,7 @@ data_upload_summary <- function(upload = NULL, standardized_data = NULL) {
   data.frame(
     Label = c("Rows", "Files", "Subject IDs", "Date span", "Missing glucose"),
     Value = c(
-      format_count(nrow(upload_data)),
+      row_count,
       format_count(length(upload$files)),
       ifelse(
         is.na(subject_count),
@@ -541,7 +611,7 @@ imputation_review_level <- function(missing_rows, missing_percent) {
   }
 }
 
-imputation_subject_missingness_summary <- function(data, interval_minutes = 5L, precomputed = NULL) {
+imputation_subject_missingness_summary <- function(data, interval_minutes = 5L, precomputed = NULL, include_timestamp_gaps = TRUE) {
   empty <- data.frame(
     `Subject ID` = character(),
     `Missing glucose values` = integer(),
@@ -558,9 +628,13 @@ imputation_subject_missingness_summary <- function(data, interval_minutes = 5L, 
     return(empty)
   }
 
-  grid_summary <- if (all(c("timestamp") %in% names(data)) && any(is_finite_cgm_timestamp(data$timestamp))) {
+  grid_summary <- if (
+    isTRUE(include_timestamp_gaps) &&
+      all(c("timestamp") %in% names(data)) &&
+      any(is_finite_cgm_timestamp(data$timestamp))
+  ) {
     tryCatch(
-      missingness_grid_summary_by_id(data, interval_minutes = interval_minutes, precomputed = precomputed),
+      missingness_grid_summary_for_review(data, interval_minutes = interval_minutes, precomputed = precomputed),
       error = function(e) NULL
     )
   } else {
@@ -573,16 +647,31 @@ imputation_subject_missingness_summary <- function(data, interval_minutes = 5L, 
     rows <- rows[match(ids, rows$id), , drop = FALSE]
     missing_values <- rows$missing_glucose
     missing_percent <- rows$missing_glucose_rate
-  } else {
-    rows <- lapply(ids, function(id) {
-      x <- data[as.character(data$id) == id, , drop = FALSE]
-      missing_values <- sum(is.na(x$glucose), na.rm = TRUE)
-      missing_percent <- if (nrow(x)) round(100 * missing_values / nrow(x), 2) else NA_real_
-      data.frame(id = id, missing_glucose = missing_values, missing_glucose_rate = missing_percent)
-    })
-    rows <- do.call(rbind, rows)
+  } else if (requireNamespace("data.table", quietly = TRUE)) {
+    dt <- data.table::as.data.table(data[, c("id", "glucose"), drop = FALSE])
+    rows <- dt[, list(
+      rows = .N,
+      missing_glucose = sum(is.na(glucose), na.rm = TRUE)
+    ), by = id]
+    rows[, missing_glucose_rate := ifelse(rows > 0L, round(100 * missing_glucose / rows, 2), NA_real_)]
+    rows <- as.data.frame(rows, stringsAsFactors = FALSE)
+    rows <- rows[match(ids, as.character(rows$id)), , drop = FALSE]
     missing_values <- rows$missing_glucose
     missing_percent <- rows$missing_glucose_rate
+  } else {
+    rows <- rowsum(
+      as.integer(is.na(data$glucose)),
+      group = as.character(data$id),
+      reorder = FALSE
+    )
+    counts <- rowsum(
+      rep.int(1L, nrow(data)),
+      group = as.character(data$id),
+      reorder = FALSE
+    )
+    missing_values <- as.numeric(rows[ids, 1L])
+    row_counts <- as.numeric(counts[ids, 1L])
+    missing_percent <- ifelse(row_counts > 0L, round(100 * missing_values / row_counts, 2), NA_real_)
   }
 
   review <- mapply(
@@ -608,7 +697,7 @@ imputation_subject_missingness_summary <- function(data, interval_minutes = 5L, 
   out
 }
 
-imputation_missingness_summary <- function(data, interval_minutes = 5L, precomputed = NULL) {
+imputation_missingness_summary <- function(data, interval_minutes = 5L, precomputed = NULL, include_timestamp_gaps = TRUE) {
   if (!is.data.frame(data) || !nrow(data) || !"glucose" %in% names(data)) {
     out <- data.frame(
       rows = 0L,
@@ -625,26 +714,59 @@ imputation_missingness_summary <- function(data, interval_minutes = 5L, precompu
     attr(out, "subject_missingness") <- imputation_subject_missingness_summary(
       data,
       interval_minutes = interval_minutes,
-      precomputed = precomputed
+      precomputed = precomputed,
+      include_timestamp_gaps = include_timestamp_gaps
     )
     return(out)
   }
 
-  grid_summary <- if (all(c("id", "timestamp") %in% names(data)) && any(is_finite_cgm_timestamp(data$timestamp))) {
+  grid_error <- NULL
+  grid_summary <- if (
+    isTRUE(include_timestamp_gaps) &&
+      all(c("id", "timestamp") %in% names(data)) &&
+      any(is_finite_cgm_timestamp(data$timestamp))
+  ) {
     tryCatch(
-      missingness_grid_summary_by_id(data, interval_minutes = interval_minutes, precomputed = precomputed),
-      error = function(e) NULL
+      missingness_grid_summary_for_review(data, interval_minutes = interval_minutes, precomputed = precomputed),
+      error = function(e) {
+        grid_error <<- e
+        NULL
+      }
     )
   } else {
     NULL
   }
-  if (is.data.frame(grid_summary) && nrow(grid_summary)) {
+  if (!is.null(grid_error)) {
+    explicit_missing <- sum(is.na(data$glucose), na.rm = TRUE)
+    missing_rows <- NA_integer_
+    missing_percent <- NA_real_
+    estimated_missing <- NA_integer_
+    expanded_rows <- nrow(data)
+    affected_subjects <- if ("id" %in% names(data)) {
+      length(unique(as.character(data$id[is.na(data$glucose)])))
+    } else {
+      NA_integer_
+    }
+    severity <- "Review needed"
+    severity_class <- "warning"
+    message <- paste("Timestamp-gap missingness could not be reviewed:", conditionMessage(grid_error))
+  } else if (is.data.frame(grid_summary) && nrow(grid_summary)) {
     expanded_rows <- sum(grid_summary$expanded_rows, na.rm = TRUE)
     explicit_missing <- sum(grid_summary$explicit_missing_glucose, na.rm = TRUE)
     estimated_missing <- sum(grid_summary$estimated_missing_readings, na.rm = TRUE)
     missing_rows <- sum(grid_summary$missing_glucose, na.rm = TRUE)
     missing_percent <- if (expanded_rows > 0L) round(100 * missing_rows / expanded_rows, 2) else NA_real_
     affected_subjects <- sum(grid_summary$missing_glucose > 0L, na.rm = TRUE)
+  } else if (requireNamespace("data.table", quietly = TRUE)) {
+    dt <- data.table::as.data.table(data[, c("id", "glucose"), drop = FALSE])
+    missing_by_id <- dt[, list(missing_glucose = sum(is.na(glucose), na.rm = TRUE)), by = id]
+    missing <- is.na(data$glucose)
+    missing_rows <- sum(missing)
+    missing_percent <- round(100 * missing_rows / nrow(data), 2)
+    explicit_missing <- missing_rows
+    estimated_missing <- NA_integer_
+    expanded_rows <- nrow(data)
+    affected_subjects <- sum(missing_by_id$missing_glucose > 0L, na.rm = TRUE)
   } else {
     missing <- is.na(data$glucose)
     missing_rows <- sum(missing)
@@ -652,18 +774,20 @@ imputation_missingness_summary <- function(data, interval_minutes = 5L, precompu
     explicit_missing <- missing_rows
     estimated_missing <- NA_integer_
     expanded_rows <- nrow(data)
-    affected_subjects <- if ("id" %in% names(data)) {
-      length(subject_id_values(data[missing, , drop = FALSE]))
-    } else {
-      0L
-    }
+    affected_subjects <- if ("id" %in% names(data)) length(unique(as.character(data$id[missing]))) else 0L
+    review <- imputation_review_level(missing_rows, missing_percent)
+    severity <- review$severity
+    severity_class <- review$severity_class
+    message <- review$message
   }
 
-  review <- imputation_review_level(missing_rows, missing_percent)
-  severity <- review$severity
-  severity_class <- review$severity_class
-  message <- review$message
-  imputation_warning <- missing_percent > 25
+  if (is.null(grid_error)) {
+    review <- imputation_review_level(missing_rows, missing_percent)
+    severity <- review$severity
+    severity_class <- review$severity_class
+    message <- review$message
+  }
+  imputation_warning <- isTRUE(!is.na(missing_percent) && missing_percent > 25)
 
   out <- data.frame(
     rows = expanded_rows,
@@ -683,10 +807,12 @@ imputation_missingness_summary <- function(data, interval_minutes = 5L, precompu
     message = message,
     stringsAsFactors = FALSE
   )
+  attr(out, "include_timestamp_gaps") <- isTRUE(include_timestamp_gaps)
   attr(out, "subject_missingness") <- imputation_subject_missingness_summary(
     data,
     interval_minutes = interval_minutes,
-    precomputed = precomputed
+    precomputed = precomputed,
+    include_timestamp_gaps = include_timestamp_gaps
   )
   out
 }
@@ -696,16 +822,44 @@ imputation_summary_cards <- function(summary) {
     return(data.frame(Label = character(), Value = character(), stringsAsFactors = FALSE))
   }
   percent <- summary$missing_percent[[1L]]
+  percent_label <- if (is.na(percent)) "Not available" else paste0(format(round(percent, 2), trim = TRUE), "%")
+  count_label <- function(value) {
+    if (length(value) == 0L || is.na(value[[1L]])) "Not available" else format_count(value[[1L]])
+  }
+  if (isTRUE(attr(summary, "include_timestamp_gaps", exact = TRUE))) {
+    return(data.frame(
+      Label = c(
+        "Missing glucose or inferred gap readings",
+        "Uploaded blank glucose rows",
+        "Inferred timestamp-gap readings",
+        "Missing glucose (%)",
+        "Subject IDs affected",
+        "Review level"
+      ),
+      Value = c(
+        count_label(summary$missing_glucose),
+        count_label(summary$explicit_missing_glucose),
+        count_label(summary$estimated_missing_readings),
+        percent_label,
+        count_label(summary$subjects_affected),
+        summary$severity[[1L]]
+      ),
+      stringsAsFactors = FALSE
+    ))
+  }
+
   data.frame(
     Label = c(
-      "Missing glucose values",
-      "Missing glucose (%)",
+      "Uploaded blank glucose rows",
+      "Uploaded blank glucose (%)",
+      "Inferred timestamp-gap readings",
       "Subject IDs affected",
       "Review level"
     ),
     Value = c(
-      format_count(summary$missing_glucose[[1L]]),
-      if (is.na(percent)) "Not available" else paste0(format(round(percent, 2), trim = TRUE), "%"),
+      format_count(summary$explicit_missing_glucose[[1L]]),
+      percent_label,
+      "Not included",
       format_count(summary$subjects_affected[[1L]]),
       summary$severity[[1L]]
     ),
@@ -743,10 +897,14 @@ imputation_summary_box_ui <- function(summary) {
         summary$imputation_warning_message[[1L]]
       )
     },
-    shiny::tags$p(
-      class = "help-block",
-      "Missing glucose values include uploaded blank glucose values and inferred timestamp-gap readings."
-    ),
+  shiny::tags$p(
+    class = "help-block",
+      if (isTRUE(attr(summary, "include_timestamp_gaps", exact = TRUE))) {
+        "Missing glucose values include uploaded blank glucose values and inferred timestamp-gap readings."
+      } else {
+        "This setup summary counts uploaded blank glucose values only."
+      }
+  ),
     summary_card_ui(imputation_summary_cards(summary), compact = TRUE),
     if (is.data.frame(subject_summary) && nrow(subject_summary)) {
       shiny::tagList(
@@ -778,9 +936,15 @@ data_status_summary <- function(
   mapping = NULL,
   standardized_data = NULL,
   standardization_error = NULL,
-  settings = NULL
+  settings = NULL,
+  missingness_review = NULL
 ) {
-  summary <- data_upload_summary(upload, standardized_data)
+  summary <- data_upload_summary(
+    upload,
+    standardized_data,
+    interval_minutes = settings$imputation_interval_minutes %||% 5L,
+    missingness_review = missingness_review
+  )
   if (!nrow(summary)) {
     return(summary)
   }
@@ -811,14 +975,16 @@ data_status_strip_ui <- function(
   mapping = NULL,
   standardized_data = NULL,
   standardization_error = NULL,
-  settings = NULL
+  settings = NULL,
+  missingness_review = NULL
 ) {
   summary <- data_status_summary(
     upload = upload,
     mapping = mapping,
     standardized_data = standardized_data,
     standardization_error = standardization_error,
-    settings = settings
+    settings = settings,
+    missingness_review = missingness_review
   )
   if (!nrow(summary)) {
     return(NULL)

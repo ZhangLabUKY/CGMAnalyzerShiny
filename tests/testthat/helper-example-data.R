@@ -11,6 +11,7 @@ example_missing_5pct_raw_data <- function(fill_missing = FALSE) {
 example_missing_5pct_standardized <- function(fill_missing = FALSE) {
   standardize_cgm_data(
     example_missing_5pct_raw_data(fill_missing = fill_missing),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES"),
+    timestamp_parser = "compatibility"
   )
 }

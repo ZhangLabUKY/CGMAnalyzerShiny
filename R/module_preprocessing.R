@@ -188,7 +188,7 @@ imputation_run_status_ui <- function(status, selected_method = "none") {
   )
 }
 
-preprocessing_module_server <- function(id, mapping, standardized) {
+preprocessing_module_server <- function(id, mapping, standardized, shared_missingness = NULL) {
   shiny::moduleServer(id, function(input, output, session) {
     imputation_status <- shiny::reactiveVal(list(
       state = "not_run",
@@ -213,43 +213,50 @@ preprocessing_module_server <- function(id, mapping, standardized) {
       )
     })
 
-    output$imputation_summary <- shiny::renderUI({
+    imputation_summary_state <- shiny::bindCache(shiny::reactive({
+      if (
+        is.environment(shared_missingness) &&
+          is.function(shared_missingness$analysis_missingness_review)
+      ) {
+        return(shared_missingness$analysis_missingness_review())
+      }
       data <- tryCatch(
         {
+          standardized_data <- standardized()
           date_range <- normalize_analysis_date_range(
             input$analysis_date_range,
-            standardized()
+            standardized_data
           )
-          filter_analysis_date_range(standardized(), date_range)
+          filter_analysis_date_range(standardized_data, date_range)
         },
         shiny.silent.error = function(error) NULL,
         error = function(error) NULL
       )
       interval_minutes <- input$imputation_interval_minutes %||% 5L
-      precomputed <- if (
-        is.data.frame(data) &&
-          nrow(data) &&
-          all(c("id", "timestamp", "glucose") %in% names(data))
-      ) {
-        tryCatch(
-          cgm_timed(
-            "data_imputation_summary_precompute",
-            missingness_precompute(data, interval_minutes = interval_minutes)
-          ),
-          error = function(error) NULL
-        )
-      } else {
-        NULL
-      }
-      summary <- cgm_timed(
-        "data_imputation_candidate_summary",
-        imputation_missingness_summary(
-          data,
-          interval_minutes = interval_minutes,
-          precomputed = precomputed
+      summary <- shiny::withProgress(
+        message = "Reviewing timestamp gaps...",
+        value = 0.4,
+        cgm_timed(
+          "data_imputation_candidate_summary_fast",
+          cgm_suppress_non_cgma_messages(
+            imputation_missingness_summary(
+              data,
+              interval_minutes = interval_minutes,
+              precomputed = NULL,
+              include_timestamp_gaps = TRUE
+            )
+          )
         )
       )
-      imputation_summary_box_ui(summary)
+    }),
+    cgm_data_signature(standardized()),
+    as.character(input$analysis_date_range %||% ""),
+    input$imputation_interval_minutes %||% 5L,
+    cache = "session"
+    )
+
+    output$imputation_summary <- shiny::renderUI({
+      imputation_summary_box_ui(imputation_summary_state())
     })
 
     output$imputation_options_ui <- shiny::renderUI({

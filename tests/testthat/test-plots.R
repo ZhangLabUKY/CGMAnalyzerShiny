@@ -319,11 +319,11 @@ test_that("plot subject filter choices are stable and user-facing", {
 
   choices <- plot_subject_filter_choices(data)
 
-  expect_equal(names(choices)[[1L]], "All")
-  expect_equal(unname(choices)[[1L]], all_filter_value())
-  expect_equal(unname(choices), c(all_filter_value(), "A", "B"))
-  expect_equal(preserve_filter_selection("A", choices), "A")
-  expect_equal(preserve_filter_selection("Missing", choices), all_filter_value())
+  expect_equal(names(choices)[[1L]], "A")
+  expect_equal(unname(choices), c("A", "B", all_filter_value()))
+  expect_equal(preserve_subject_filter_selection("A", choices, data$id), "A")
+  expect_equal(preserve_subject_filter_selection("Missing", choices, data$id), "A")
+  expect_equal(preserve_subject_filter_selection(all_filter_value(), choices, data$id), all_filter_value())
 })
 
 test_that("daily overlay remains available for one filename-derived subject", {
@@ -720,4 +720,46 @@ test_that("AGP plotly visual traces remain continuous and finite", {
   expect_gt(length(outer_band$x), 50)
   expect_gt(length(inner_band$x), 50)
   expect_gt(length(median_line$x), 40)
+})
+
+test_that("trace and daily overlay native plotly paths return plotly widgets", {
+  data <- data.frame(
+    id = rep(c("A", "B"), each = 4),
+    timestamp = parse_cgm_timestamp(rep(sprintf("2026-05-05 %02d:00:00", 8:11), 2)),
+    glucose = c(90, 100, 110, 120, 95, 105, 115, 125),
+    units = "mg/dL",
+    device = NA_character_,
+    group = NA_character_,
+    source_file = NA_character_,
+    imputed_flag = rep(c(FALSE, FALSE, TRUE, FALSE), 2),
+    stringsAsFactors = FALSE
+  )
+
+  trace <- create_trace_plotly(data, max_points_per_participant = Inf)
+  daily <- create_daily_overlay_plotly(data, max_points_per_participant = Inf)
+  trace_built <- plotly::plotly_build(trace)
+  daily_built <- plotly::plotly_build(daily)
+
+  expect_s3_class(trace, "plotly")
+  expect_s3_class(daily, "plotly")
+  expect_true(length(trace_built$x$data) >= 2L)
+  expect_true(length(daily_built$x$data) >= 1L)
+})
+
+test_that("plot downsampling preserves imputed rows and glucose extremes", {
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp("2026-05-05 00:00:00") + seq(0, by = 300, length.out = 100),
+    glucose = seq_len(100),
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+  data$imputed_flag[[50L]] <- TRUE
+
+  downsampled <- prepare_plot_display_data(data, max_points_per_participant = 10)
+
+  expect_lte(nrow(downsampled), 10)
+  expect_true(any(downsampled$imputed_flag))
+  expect_true(min(data$glucose) %in% downsampled$glucose)
+  expect_true(max(data$glucose) %in% downsampled$glucose)
 })

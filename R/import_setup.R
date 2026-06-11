@@ -81,7 +81,7 @@ column_indices_matching <- function(headers, patterns) {
 }
 
 parseable_import_timestamp <- function(x) {
-  parsed <- parse_cgm_timestamp(x, tz = "UTC")
+  parsed <- parse_cgm_timestamp(x, tz = "UTC", timestamp_parser = "compatibility")
   !is.na(parsed)
 }
 

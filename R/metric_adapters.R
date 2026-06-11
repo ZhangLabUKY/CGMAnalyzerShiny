@@ -51,7 +51,11 @@ merge_iglu_metric <- function(base, metric) {
   if (!nrow(metric)) {
     return(base)
   }
-  merge(base, metric, by = ".adapter_group", all.x = TRUE, sort = FALSE)
+  out <- data.table::as.data.table(base)
+  metric_dt <- data.table::as.data.table(metric)
+  value_cols <- setdiff(names(metric_dt), ".adapter_group")
+  out[metric_dt, (value_cols) := mget(paste0("i.", value_cols)), on = ".adapter_group"]
+  as.data.frame(out, stringsAsFactors = FALSE)
 }
 
 #' Regularize one CGM time series
@@ -222,7 +226,13 @@ compute_iglu_metrics <- function(data, by = default_metric_groups(data)) {
   }
 
   lookup <- group_map[, c(by, ".adapter_group"), drop = FALSE]
-  data_with_group <- merge(data, lookup, by = by, all.x = TRUE, sort = FALSE)
+  data_with_group <- as.data.frame(
+    data.table::as.data.table(lookup)[
+      data.table::as.data.table(data),
+      on = by
+    ],
+    stringsAsFactors = FALSE
+  )
   iglu_data <- data.frame(
     id = as.character(data_with_group$.adapter_group),
     time = data_with_group$timestamp,
@@ -250,5 +260,9 @@ merge_metric_adapter <- function(base, adapter, by) {
   if (is.null(adapter) || !nrow(adapter)) {
     return(base)
   }
-  merge(base, adapter, by = by, all.x = TRUE, sort = FALSE)
+  out <- data.table::as.data.table(base)
+  adapter_dt <- data.table::as.data.table(adapter)
+  value_cols <- setdiff(names(adapter_dt), by)
+  out[adapter_dt, (value_cols) := mget(paste0("i.", value_cols)), on = by]
+  as.data.frame(out, stringsAsFactors = FALSE)
 }

@@ -1,5 +1,5 @@
 test_that("parse_cgm_timestamp handles common timestamp formats", {
-  parsed <- parse_cgm_timestamp(c("2026-05-05 08:00:00", "05/05/2026 08:05"))
+  parsed <- parse_cgm_timestamp(c("2026-05-05 08:00:00", "05/05/2026 08:05"), timestamp_parser = "compatibility")
 
   expect_s3_class(parsed, "POSIXct")
   expect_false(any(is.na(parsed)))
@@ -13,7 +13,7 @@ test_that("parse_cgm_timestamp handles ISO, AM/PM, dash dates, and Excel timesta
     "05/13/2026 11:30 PM",
     "13-05-2026 23:30",
     as.character(excel_value)
-  ))
+  ), timestamp_parser = "compatibility")
 
   expect_equal(format_cgm_timestamp_iso(parsed), c(
     "2026-05-06T11:30:00",
@@ -29,7 +29,7 @@ test_that("parse_cgm_timestamp handles year-first colon CGM timestamps", {
     "2020:01:16:00:00",
     "2020:01:16:00:00:30",
     "2020-01-16T00:00:00"
-  ))
+  ), timestamp_parser = "compatibility")
 
   expect_equal(format_cgm_timestamp_iso(parsed), c(
     "2020-01-16T00:00:00",
@@ -68,6 +68,47 @@ test_that("parse_cgm_timestamp keeps ISO UTC timestamp parsing intact", {
   ))))
 })
 
+test_that("fasttime timestamp path preserves strict ISO timestamps", {
+  testthat::skip_if_not_installed("fasttime")
+  raw <- c("2026-05-05T08:00:00Z", "2026-05-05 08:05:00")
+
+  parsed <- fasttime_parse_cgm_timestamp(raw, tz = "UTC")
+
+  expect_s3_class(parsed, "POSIXct")
+  expect_equal(format_cgm_timestamp_iso(parsed), c(
+    "2026-05-05T08:00:00",
+    "2026-05-05T08:05:00"
+  ))
+})
+
+test_that("sample-detected fast timestamp parsing falls back only for failed rows", {
+  raw <- c(rep("2026-05-05 08:00:00", 350), "not a timestamp")
+
+  parsed <- parse_cgm_timestamp(raw, tz = "UTC", timestamp_parser = "compatibility")
+
+  expect_equal(sum(!is.na(parsed)), 350L)
+  expect_true(is.na(parsed[[351L]]))
+  expect_equal(format_cgm_timestamp_iso(parsed[[1L]]), "2026-05-05T08:00:00")
+})
+
+test_that("default timestamp parsing prefers fasttime without compatibility fallback", {
+  parsed <- parse_cgm_timestamp(c("2026-05-05 08:00:00", "2020:01:16:00:00", "05/05/2026 08:05"))
+
+  expect_false(is.na(parsed[[1L]]))
+  expect_equal(format_cgm_timestamp_iso(parsed[[2L]]), "2020-01-16T00:00:00")
+  expect_true(is.na(parsed[[3L]]))
+})
+
+test_that("timestamp parser option can enable lubridate compatibility", {
+  old <- options(CGMA.timestamp_parser = "compatibility")
+  on.exit(options(old), add = TRUE)
+
+  parsed <- parse_cgm_timestamp("05/05/2026 08:05")
+
+  expect_false(is.na(parsed))
+  expect_equal(format_cgm_timestamp_iso(parsed), "2026-05-05T08:05:00")
+})
+
 test_that("ambiguous day and month timestamps default to day first", {
   raw <- data.frame(
     id = "A",
@@ -77,15 +118,17 @@ test_that("ambiguous day and month timestamps default to day first", {
   )
 
   expect_true(has_ambiguous_timestamps(raw$timestamp))
-  expect_equal(format_cgm_timestamp_iso(parse_cgm_timestamp(raw$timestamp)), "2019-02-01T02:49:00")
+  expect_equal(format_cgm_timestamp_iso(parse_cgm_timestamp(raw$timestamp, timestamp_parser = "compatibility")), "2019-02-01T02:49:00")
   out <- standardize_cgm_data(
     raw,
-    mapping = list(id = "id", timestamp = "timestamp", glucose = "glucose")
+    mapping = list(id = "id", timestamp = "timestamp", glucose = "glucose"),
+    timestamp_parser = "compatibility"
   )
   mdy <- standardize_cgm_data(
     raw,
     mapping = list(id = "id", timestamp = "timestamp", glucose = "glucose"),
-    timestamp_date_order = "mdy"
+    timestamp_date_order = "mdy",
+    timestamp_parser = "compatibility"
   )
 
   expect_equal(format_cgm_timestamp_iso(out$timestamp), "2019-02-01T02:49:00")
@@ -129,6 +172,8 @@ test_that("standardize_cgm_data maps required and optional columns", {
   )
 
   expect_named(out, c("id", "id_source", "timestamp", "glucose", "units", "device", "source_file", "imputed_flag", "group", "age", "sex", "hba1c"))
+  expect_s3_class(out, "data.frame")
+  expect_false(data.table::is.data.table(out))
   expect_equal(out$id, c("A", "A", "B"))
   expect_equal(unique(out$id_source), subject_id_source_mapped())
   expect_equal(out$group, c("Control", "Control", "Treatment"))
@@ -138,6 +183,45 @@ test_that("standardize_cgm_data maps required and optional columns", {
   expect_false("empty_feature" %in% names(out))
   expect_true(all(out$units == "mg/dL"))
   expect_true(all(out$imputed_flag == FALSE))
+})
+
+test_that("standardize_cgm_data sorts by reference-compatible order and preserves metadata", {
+  raw <- data.frame(
+    subject = c("B", "A", "A"),
+    time = c("2026-05-05 08:10:00", "2026-05-05 08:05:00", "2026-05-05 08:00:00"),
+    value = c("1,200", "100", "110"),
+    stringsAsFactors = FALSE
+  )
+  metadata <- data.frame(
+    id = c("A", "B"),
+    cohort = c("Control", "Treatment"),
+    stringsAsFactors = FALSE
+  )
+
+  out <- standardize_cgm_data(
+    raw,
+    mapping = list(
+      id = "subject",
+      timestamp = "time",
+      glucose = "value",
+      subject_metadata = metadata
+    )
+  )
+
+  expect_false(data.table::is.data.table(out))
+  expect_equal(out$id, c("A", "A", "B"))
+  expect_equal(format_cgm_timestamp_iso(out$timestamp), c(
+    "2026-05-05T08:00:00",
+    "2026-05-05T08:05:00",
+    "2026-05-05T08:10:00"
+  ))
+  expect_equal(out$glucose, c(110, 100, 1200))
+  expect_equal(out$cohort, c("Control", "Control", "Treatment"))
+})
+
+test_that("coerce_glucose handles numeric and comma-formatted character values", {
+  expect_equal(coerce_glucose(c(100, 110.5)), c(100, 110.5))
+  expect_equal(coerce_glucose(c("1,000", "120", "")), c(1000, 120, NA_real_))
 })
 
 test_that("example CGMissingDataR-style upload shape parses colon time and missing glucose", {
@@ -165,7 +249,8 @@ test_that("example CGMissingDataR-style upload shape parses colon time and missi
       timestamp = "Time",
       glucose = "LBORRES",
       subject_metadata = data.frame(id = c("11", "18"), group = c("F", "M"), stringsAsFactors = FALSE)
-    )
+    ),
+    timestamp_parser = "compatibility"
   )
 
   expect_equal(subject_id_values(out), c("11", "18"))
@@ -281,6 +366,48 @@ test_that("read_cgm_file adds source file and filename-derived source id", {
   expect_equal(out$.import_header_row, 1L)
   expect_equal(out$.import_first_data_row, 2L)
   expect_equal(derive_source_id("Patient-002.csv"), "Patient-002")
+})
+
+test_that("read_cgm_file can read a selected setup sample", {
+  path <- tempfile(fileext = ".csv")
+  writeLines(c(
+    "subject,time,glucose,extra",
+    "A,2026-05-05 08:00:00,100,discard",
+    "A,2026-05-05 08:05:00,101,discard",
+    "A,2026-05-05 08:10:00,102,discard"
+  ), path)
+
+  out <- read_cgm_file(
+    path,
+    "Patient-001.csv",
+    select_columns = c("subject", "time", "glucose"),
+    nrows = 2
+  )
+
+  expect_equal(nrow(out), 2)
+  expect_true(all(c("subject", "time", "glucose", ".source_file", ".source_id") %in% names(out)))
+  expect_false("extra" %in% names(out))
+})
+
+test_that("read_cgm_file can do a selected full read when nrows is NULL", {
+  path <- tempfile(fileext = ".csv")
+  writeLines(c(
+    "subject,time,glucose,extra",
+    "A,2026-05-05 08:00:00,100,discard",
+    "A,2026-05-05 08:05:00,101,discard",
+    "A,2026-05-05 08:10:00,102,discard"
+  ), path)
+
+  out <- read_cgm_file(
+    path,
+    "Patient-001.csv",
+    select_columns = c("subject", "time", "glucose"),
+    nrows = NULL
+  )
+
+  expect_equal(nrow(out), 3)
+  expect_true(all(c("subject", "time", "glucose") %in% names(out)))
+  expect_false("extra" %in% names(out))
 })
 
 test_that("single-file standardization uses selected or filename-derived subject ids", {

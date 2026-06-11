@@ -59,6 +59,7 @@ complexity_module_ui <- function(id) {
       ),
       shiny::div(
         class = "cgm-dashboard-section-body",
+        shiny::uiOutput(ns("complexity_progress")),
         shinycssloaders::withSpinner(shiny::uiOutput(ns("summary_cards")), type = 4),
         shiny::uiOutput(ns("mse_status_note"))
       )
@@ -136,45 +137,197 @@ complexity_subject_id_display_override <- function(subject = NULL) {
   if (specific_filter_selected(subject)) TRUE else NULL
 }
 
+complexity_make_store <- function(key, ids, selected = "") {
+  list(
+    key = key,
+    ids = ids,
+    entries = new.env(parent = emptyenv()),
+    queue = subject_queue_new(ids, selected, subject_background_batch_size("complexity")),
+    worker_tokens = integer()
+  )
+}
+
+complexity_store_get <- function(store, id) {
+  if (is.null(store$entries) || !exists(id, envir = store$entries, inherits = FALSE)) {
+    return(NULL)
+  }
+  get(id, envir = store$entries, inherits = FALSE)
+}
+
+complexity_store_set <- function(store, id, entry) {
+  assign(id, entry, envir = store$entries)
+  invisible(entry)
+}
+
+complexity_store_ids <- function(store) {
+  if (is.null(store$entries)) {
+    return(character())
+  }
+  ls(store$entries, all.names = TRUE)
+}
+
+complexity_update_entry <- function(store, id, values) {
+  existing <- complexity_store_get(store, id) %||% list(
+    id = id,
+    metrics = NULL,
+    curves = empty_complexity_curve_rows(),
+    quick_status = "idle",
+    hurst_status = "idle",
+    curve_status = "idle",
+    mse_status = "idle"
+  )
+  entry <- utils::modifyList(existing, values)
+  entry$id <- id
+  complexity_store_set(store, id, entry)
+  entry
+}
+
+complexity_entry_metrics <- function(entry) {
+  if (is.null(entry) || !is.data.frame(entry$metrics) || !nrow(entry$metrics)) {
+    return(data.frame())
+  }
+  entry$metrics
+}
+
+complexity_entry_curves <- function(entry) {
+  if (is.null(entry) || !is.data.frame(entry$curves) || !nrow(entry$curves)) {
+    return(empty_complexity_curve_rows())
+  }
+  entry$curves
+}
+
+complexity_aggregate_metrics <- function(store, ids = NULL) {
+  ids <- ids %||% complexity_store_ids(store)
+  rows <- lapply(ids, function(id) complexity_entry_metrics(complexity_store_get(store, id)))
+  rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
+  if (!length(rows)) {
+    return(data.frame())
+  }
+  out <- do.call(rbind, rows)
+  row.names(out) <- NULL
+  out
+}
+
+complexity_aggregate_curves <- function(store, ids = NULL) {
+  ids <- ids %||% complexity_store_ids(store)
+  rows <- lapply(ids, function(id) complexity_entry_curves(complexity_store_get(store, id)))
+  rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
+  if (!length(rows)) {
+    return(empty_complexity_curve_rows())
+  }
+  out <- do.call(rbind, rows)
+  row.names(out) <- NULL
+  out
+}
+
+complexity_compute_quick_batch <- function(data, ids, parameters) {
+  batch_data <- data[as.character(data$id) %in% ids, , drop = FALSE]
+  if (!nrow(batch_data)) {
+    return(complexity_result_columns())
+  }
+  compute_complexity_quick_metrics(batch_data, parameters)
+}
+
+complexity_compute_advanced_batch <- function(data, ids, parameters) {
+  batch_data <- data[as.character(data$id) %in% ids, , drop = FALSE]
+  if (!nrow(batch_data)) {
+    return(list(
+      hurst = empty_complexity_hurst_rows(),
+      dfa_higuchi_curves = empty_complexity_curve_rows(),
+      mse_curves = empty_complexity_curve_rows()
+    ))
+  }
+  list(
+    hurst = compute_complexity_hurst_metrics(batch_data, parameters),
+    dfa_higuchi_curves = compute_complexity_dfa_higuchi_curves(batch_data, parameters),
+    mse_curves = compute_complexity_mse_curves(
+      batch_data,
+      min_points = parameters$min_points,
+      entropy_bin_width = parameters$entropy_bin_width,
+      embedding_dimension = parameters$embedding_dimension,
+      mse_scale_max = parameters$mse_scale_max,
+      higuchi_kmax = parameters$higuchi_kmax,
+      max_gap_intervals = parameters$max_gap_intervals
+    )
+  )
+}
+
+complexity_progress_text <- function(store) {
+  if (is.null(store) || is.null(store$queue)) {
+    return("")
+  }
+  subject_queue_progress_text("Complexity", store$queue, store$ids)
+}
+
+complexity_stage_status <- function(store, selected, stage) {
+  if (is.null(store)) {
+    return("idle")
+  }
+  ids <- if (identical(selected, all_filter_value())) {
+    store$ids
+  } else {
+    normalize_filter_value(selected)
+  }
+  ids <- ids[nzchar(ids)]
+  if (!length(ids)) {
+    return("idle")
+  }
+  values <- vapply(ids, function(id) {
+    entry <- complexity_store_get(store, id)
+    if (is.null(entry)) {
+      return("running")
+    }
+    entry[[stage]] %||% "idle"
+  }, character(1))
+  if (any(values %in% "running")) {
+    return("running")
+  }
+  if (all(values %in% "complete")) {
+    return("complete")
+  }
+  if (all(values %in% "failed")) {
+    return("failed")
+  }
+  if (any(values %in% "complete")) {
+    return("running")
+  }
+  "idle"
+}
+
 complexity_module_server <- function(id, standardized, active_tab = NULL) {
   shiny::moduleServer(id, function(input, output, session) {
-    compute_data <- shiny::reactive({
+    store_state <- new.env(parent = emptyenv())
+    store_state$store <- NULL
+    progress_version <- shiny::reactiveVal(0L)
+    display_version <- shiny::reactiveVal(0L)
+
+    bump_progress <- function() progress_version(progress_version() + 1L)
+    bump_display <- function() display_version(display_version() + 1L)
+
+    all_compute_data <- shiny::reactive({
       req_active_tab(active_tab, "complexity")
       standardized()
     })
 
-    subject_choices_data <- shiny::reactive({
-      req_active_tab(active_tab, "complexity")
-      filter_complexity_data(standardized(), group = input$group)
+    queue_data <- shiny::reactive({
+      filter_complexity_data(all_compute_data(), group = input$group)
     })
 
-    output$subject_filter <- shiny::renderUI({
-      req_active_tab(active_tab, "complexity")
-      data <- subject_choices_data()
-      if (!subject_id_filter_available(data)) {
-        return(NULL)
-      }
-      choices <- filter_select_choices(sort(subject_id_values(data)), all_label = "All")
-      shiny::selectInput(
-        session$ns("subject"),
-        "Subject ID",
-        choices = choices,
-        selected = preserve_filter_selection(input$subject, choices)
-      )
+    subject_choices_data <- queue_data
+
+    complexity_subject_ids <- shiny::reactive({
+      sort(subject_id_values(queue_data()))
     })
 
-    output$group_filter <- shiny::renderUI({
-      req_active_tab(active_tab, "complexity")
-      data <- compute_data()
-      if (!plot_filter_available(data, "group", min_values = 2L)) {
-        return(NULL)
-      }
-      choices <- filter_select_choices(sort(unique(data$group)), all_label = "All")
-      shiny::selectInput(
-        session$ns("group"),
-        "Group",
-        choices = choices,
-        selected = preserve_filter_selection(input$group, choices)
+    selected_subject <- shiny::reactive({
+      input$subject %||% default_subject_selection(complexity_subject_ids())
+    })
+
+    compute_data <- shiny::reactive({
+      filter_complexity_data(
+        all_compute_data(),
+        subject = selected_subject(),
+        group = input$group
       )
     })
 
@@ -189,231 +342,217 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       )
     })
 
-    display_data <- shiny::reactive({
-      req_active_tab(active_tab, "complexity")
-      filter_complexity_data(standardized(), subject = input$subject, group = input$group)
-    })
-
-    pending_complexity_results <- shiny::bindCache(shiny::reactive({
-      req_active_tab(active_tab, "complexity")
-      cgm_timed(
-        "complexity_pending_summary",
-        compute_complexity_pending_summary(compute_data(), parameters(), status = "running")
-      )
-    }),
-    cgm_data_signature(compute_data()),
-    parameters(),
-    cache = "session"
-    )
-
-    complexity_metrics <- shiny::reactiveVal(NULL)
-    dfa_higuchi_curves <- shiny::reactiveVal(NULL)
-    mse_complexity_curves <- shiny::reactiveVal(NULL)
-    quick_status <- shiny::reactiveVal("idle")
-    hurst_status <- shiny::reactiveVal("idle")
-    curve_status <- shiny::reactiveVal("idle")
-    mse_status <- shiny::reactiveVal("idle")
-    complexity_state <- new.env(parent = emptyenv())
-    complexity_state$key <- NULL
-    complexity_state$worker_token <- NULL
-    complexity_state$cleanup_scheduled <- FALSE
-    complexity_state$hurst_pending <- FALSE
-    complexity_state$curve_pending <- FALSE
-    complexity_state$mse_pending <- FALSE
-    complexity_state$mse_planned <- FALSE
-
     complexity_key <- shiny::reactive({
-      complexity_compute_key(compute_data(), parameters())
+      paste(
+        utils::capture.output(utils::str(list(
+          data = cgm_data_signature(queue_data()),
+          group = normalize_filter_value(input$group),
+          parameters = parameters()
+        ))),
+        collapse = "\n"
+      )
     })
 
-    reset_complexity_job_state <- function() {
-      complexity_state$worker_token <- NULL
-      complexity_state$cleanup_scheduled <- FALSE
-      complexity_state$hurst_pending <- FALSE
-      complexity_state$curve_pending <- FALSE
-      complexity_state$mse_pending <- FALSE
-      complexity_state$mse_planned <- FALSE
-      hurst_status("idle")
-      curve_status("idle")
-      mse_status("idle")
+    ensure_complexity_store <- function() {
+      key <- complexity_key()
+      ids <- complexity_subject_ids()
+      if (is.null(store_state$store) || !identical(store_state$store$key, key)) {
+        store_state$store <- complexity_make_store(key, ids, selected_subject())
+        bump_progress()
+        bump_display()
+      }
+      store_state$store
     }
 
-    maybe_schedule_complexity_worker_cleanup <- function(key) {
-      if (!identical(complexity_state$key, key)) {
-        return(FALSE)
-      }
-      if (isTRUE(complexity_state$cleanup_scheduled) || is.null(complexity_state$worker_token)) {
-        return(FALSE)
-      }
-      if (
-        isTRUE(complexity_state$hurst_pending) ||
-          isTRUE(complexity_state$curve_pending) ||
-          isTRUE(complexity_state$mse_pending) ||
-          isTRUE(complexity_state$mse_planned)
-      ) {
-        return(FALSE)
-      }
-      complexity_state$cleanup_scheduled <- TRUE
-      schedule_background_worker_cleanup(complexity_state$worker_token)
+    should_update_complexity_display <- function(ids) {
+      selected <- selected_subject()
+      identical(selected, all_filter_value()) || normalize_filter_value(selected) %in% ids
     }
 
-    run_quick_job <- function(data, params, key, failed_results) {
-      quick_status("running")
-      complexity_state$worker_token <- configure_background_workers()
-      complexity_state$cleanup_scheduled <- FALSE
+    run_next_complexity_batch <- function()
+      NULL
+
+    run_complexity_advanced_batch <- function(data, ids, params, key) {
+      worker_token <- configure_background_workers()
+      store_state$store$worker_tokens <- unique(c(store_state$store$worker_tokens, worker_token))
       promise <- promises::future_promise({
         cgm_timed(
-          "complexity_quick_metrics",
-          compute_complexity_quick_metrics(data, params)
+          "complexity_advanced_batch_background",
+          complexity_compute_advanced_batch(data, ids, params),
+          context = list(subjects = length(ids))
         )
       })
       promises::then(
         promise,
         onFulfilled = function(value) {
-          if (!identical(complexity_state$key, key)) {
+          if (is.null(store_state$store) || !identical(store_state$store$key, key)) {
+            schedule_background_worker_cleanup(worker_token)
             return(NULL)
           }
-          quick_ok <- is.data.frame(value) && nrow(value) > 0L
-          quick_results <- if (quick_ok) value else failed_results
-          if (quick_ok) {
-            complexity_metrics(merge_complexity_hurst_results(quick_results, NULL, status = "running"))
-            quick_status("complete")
-            eligible_ids <- quick_results$id[quick_results$eligible %in% TRUE]
-            if (length(eligible_ids)) {
-              complexity_state$mse_planned <- TRUE
-              mse_status("running")
-              run_hurst_job(data, params, key)
-              run_dfa_higuchi_curve_job(data, params, key)
-            } else {
-              hurst_status("idle")
-              curve_status("idle")
-              mse_status("idle")
-              maybe_schedule_complexity_worker_cleanup(key)
+          failed <- character()
+          for (subject_id in ids) {
+            entry <- complexity_store_get(store_state$store, subject_id)
+            if (is.null(entry) || !is.data.frame(entry$metrics) || !nrow(entry$metrics)) {
+              failed <- c(failed, subject_id)
+              next
             }
+            hurst_rows <- value$hurst[as.character(value$hurst$id) == subject_id, , drop = FALSE]
+            dfa_rows <- value$dfa_higuchi_curves[as.character(value$dfa_higuchi_curves$id) == subject_id, , drop = FALSE]
+            mse_rows <- value$mse_curves[as.character(value$mse_curves$id) == subject_id, , drop = FALSE]
+            curves <- rbind(dfa_rows, mse_rows)
+            row.names(curves) <- NULL
+            metrics <- merge_complexity_hurst_results(entry$metrics, hurst_rows, status = "complete")
+            complexity_update_entry(store_state$store, subject_id, list(
+              metrics = metrics,
+              curves = curves,
+              hurst_status = "complete",
+              curve_status = if (nrow(dfa_rows)) "complete" else "failed",
+              mse_status = if (nrow(mse_rows)) "complete" else "failed"
+            ))
+          }
+          store_state$store$queue <- subject_queue_mark_finished(store_state$store$queue, ids, failed = failed)
+          bump_progress()
+          if (should_update_complexity_display(ids)) {
+            bump_display()
+          }
+          schedule_background_worker_cleanup(worker_token)
+          run_next_complexity_batch()
+          NULL
+        },
+        onRejected = function(error) {
+          if (!is.null(store_state$store) && identical(store_state$store$key, key)) {
+            for (subject_id in ids) {
+              entry <- complexity_store_get(store_state$store, subject_id)
+              metrics <- if (!is.null(entry) && is.data.frame(entry$metrics)) {
+                merge_complexity_hurst_results(entry$metrics, NULL, status = "failed")
+              } else {
+                compute_complexity_pending_summary(data[as.character(data$id) == subject_id, , drop = FALSE], params, status = "failed")
+              }
+              complexity_update_entry(store_state$store, subject_id, list(
+                metrics = metrics,
+                curves = empty_complexity_curve_rows(),
+                hurst_status = "failed",
+                curve_status = "failed",
+                mse_status = "failed",
+                error = conditionMessage(error)
+              ))
+            }
+            store_state$store$queue <- subject_queue_mark_finished(store_state$store$queue, ids, failed = ids)
+            bump_progress()
+            if (should_update_complexity_display(ids)) {
+              bump_display()
+            }
+          }
+          schedule_background_worker_cleanup(worker_token)
+          run_next_complexity_batch()
+          NULL
+        }
+      )
+      NULL
+    }
+
+    run_next_complexity_batch <- function() {
+      store <- ensure_complexity_store()
+      if (isTRUE(store$queue$running)) {
+        return(NULL)
+      }
+      ids <- subject_queue_next_batch(store$queue)
+      if (!length(ids)) {
+        return(NULL)
+      }
+      data <- queue_data()
+      params <- parameters()
+      key <- store$key
+      store$queue <- subject_queue_mark_running(store$queue, TRUE)
+      store_state$store <- store
+      bump_progress()
+      worker_token <- configure_background_workers()
+      store_state$store$worker_tokens <- unique(c(store_state$store$worker_tokens, worker_token))
+      promise <- promises::future_promise({
+        cgm_timed(
+          "complexity_quick_batch_background",
+          complexity_compute_quick_batch(data, ids, params),
+          context = list(subjects = length(ids))
+        )
+      })
+      promises::then(
+        promise,
+        onFulfilled = function(value) {
+          if (is.null(store_state$store) || !identical(store_state$store$key, key)) {
+            schedule_background_worker_cleanup(worker_token)
+            return(NULL)
+          }
+          if (!is.data.frame(value) || !nrow(value)) {
+            store_state$store$queue <- subject_queue_mark_finished(store_state$store$queue, ids, failed = ids)
+            bump_progress()
+            schedule_background_worker_cleanup(worker_token)
+            run_next_complexity_batch()
+            return(NULL)
+          }
+          eligible_ids <- character()
+          for (subject_id in ids) {
+            quick_rows <- value[as.character(value$id) == subject_id, , drop = FALSE]
+            if (!nrow(quick_rows)) {
+              quick_rows <- compute_complexity_pending_summary(
+                data[as.character(data$id) == subject_id, , drop = FALSE],
+                params,
+                status = "failed"
+              )
+            }
+            eligible <- any(quick_rows$eligible %in% TRUE)
+            if (eligible) {
+              eligible_ids <- c(eligible_ids, subject_id)
+            }
+            complexity_update_entry(store_state$store, subject_id, list(
+              metrics = merge_complexity_hurst_results(quick_rows, NULL, status = if (eligible) "running" else "idle"),
+              curves = empty_complexity_curve_rows(),
+              quick_status = "complete",
+              hurst_status = if (eligible) "running" else "idle",
+              curve_status = if (eligible) "running" else "idle",
+              mse_status = if (eligible) "running" else "idle"
+            ))
+          }
+          bump_progress()
+          if (should_update_complexity_display(ids)) {
+            bump_display()
+          }
+          schedule_background_worker_cleanup(worker_token)
+          if (length(eligible_ids)) {
+            run_complexity_advanced_batch(data, ids, params, key)
           } else {
-            complexity_metrics(failed_results)
-            quick_status("failed")
-            hurst_status("idle")
-            curve_status("idle")
-            mse_status("idle")
-            maybe_schedule_complexity_worker_cleanup(key)
+            store_state$store$queue <- subject_queue_mark_finished(store_state$store$queue, ids)
+            bump_progress()
+            run_next_complexity_batch()
           }
           NULL
         },
         onRejected = function(error) {
-          if (identical(complexity_state$key, key)) {
-            complexity_metrics(failed_results)
-            quick_status("failed")
-            hurst_status("idle")
-            curve_status("idle")
-            mse_status("idle")
-            maybe_schedule_complexity_worker_cleanup(key)
+          if (!is.null(store_state$store) && identical(store_state$store$key, key)) {
+            for (subject_id in ids) {
+              failed <- compute_complexity_pending_summary(
+                data[as.character(data$id) == subject_id, , drop = FALSE],
+                params,
+                status = "failed"
+              )
+              complexity_update_entry(store_state$store, subject_id, list(
+                metrics = failed,
+                curves = empty_complexity_curve_rows(),
+                quick_status = "failed",
+                hurst_status = "failed",
+                curve_status = "failed",
+                mse_status = "failed",
+                error = conditionMessage(error)
+              ))
+            }
+            store_state$store$queue <- subject_queue_mark_finished(store_state$store$queue, ids, failed = ids)
+            bump_progress()
+            if (should_update_complexity_display(ids)) {
+              bump_display()
+            }
           }
+          schedule_background_worker_cleanup(worker_token)
+          run_next_complexity_batch()
           NULL
-        }
-      )
-      NULL
-    }
-
-    run_hurst_job <- function(data, params, key) {
-      complexity_state$hurst_pending <- TRUE
-      hurst_status("running")
-      promise <- promises::future_promise({
-        cgm_timed(
-          "complexity_hurst_background",
-          compute_complexity_hurst_metrics(data, params)
-        )
-      })
-      promises::then(
-        promise,
-        onFulfilled = function(value) {
-          if (identical(complexity_state$key, key)) {
-            complexity_metrics(merge_complexity_hurst_results(complexity_metrics(), value, status = "complete"))
-            complexity_state$hurst_pending <- FALSE
-            hurst_status("complete")
-            maybe_schedule_complexity_worker_cleanup(key)
-          }
-        },
-        onRejected = function(error) {
-          if (identical(complexity_state$key, key)) {
-            complexity_metrics(merge_complexity_hurst_results(complexity_metrics(), NULL, status = "failed"))
-            complexity_state$hurst_pending <- FALSE
-            hurst_status("failed")
-            maybe_schedule_complexity_worker_cleanup(key)
-          }
-        }
-      )
-      NULL
-    }
-
-    run_dfa_higuchi_curve_job <- function(data, params, key) {
-      curve_status("running")
-      complexity_state$curve_pending <- TRUE
-      promise <- promises::future_promise({
-        cgm_timed(
-          "complexity_dfa_higuchi_background",
-          compute_complexity_dfa_higuchi_curves(data, params)
-        )
-      })
-      promises::then(
-        promise,
-        onFulfilled = function(value) {
-          if (identical(complexity_state$key, key)) {
-            dfa_higuchi_curves(if (is.data.frame(value)) value else NULL)
-            curve_status("complete")
-            complexity_state$curve_pending <- FALSE
-            run_mse_curve_job(data, params, key)
-            maybe_schedule_complexity_worker_cleanup(key)
-          }
-        },
-        onRejected = function(error) {
-          if (identical(complexity_state$key, key)) {
-            dfa_higuchi_curves(NULL)
-            curve_status("failed")
-            complexity_state$curve_pending <- FALSE
-            run_mse_curve_job(data, params, key)
-            maybe_schedule_complexity_worker_cleanup(key)
-          }
-        }
-      )
-      NULL
-    }
-
-    run_mse_curve_job <- function(data, params, key) {
-      complexity_state$mse_planned <- FALSE
-      complexity_state$mse_pending <- TRUE
-      mse_status("running")
-      promise <- promises::future_promise({
-        cgm_timed(
-          "complexity_mse_background",
-          compute_complexity_mse_curves(
-            data,
-            min_points = params$min_points,
-            entropy_bin_width = params$entropy_bin_width,
-            embedding_dimension = params$embedding_dimension,
-            mse_scale_max = params$mse_scale_max,
-            higuchi_kmax = params$higuchi_kmax,
-            max_gap_intervals = params$max_gap_intervals
-          )
-        )
-      })
-      promises::then(
-        promise,
-        onFulfilled = function(value) {
-          if (identical(complexity_state$key, key)) {
-            mse_complexity_curves(if (is.data.frame(value)) value else NULL)
-            mse_status(if (is.data.frame(value) && nrow(value)) "complete" else "failed")
-            complexity_state$mse_pending <- FALSE
-            maybe_schedule_complexity_worker_cleanup(key)
-          }
-        },
-        onRejected = function(error) {
-          if (identical(complexity_state$key, key)) {
-            mse_complexity_curves(NULL)
-            mse_status("failed")
-            complexity_state$mse_pending <- FALSE
-            maybe_schedule_complexity_worker_cleanup(key)
-          }
         }
       )
       NULL
@@ -421,82 +560,114 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
 
     shiny::observe({
       req_active_tab(active_tab, "complexity")
-      pending_results <- pending_complexity_results()
-      key <- complexity_key()
-      if (identical(complexity_state$key, key)) {
-        return(NULL)
-      }
-      complexity_state$key <- key
-      complexity_metrics(NULL)
-      dfa_higuchi_curves(NULL)
-      mse_complexity_curves(NULL)
-      reset_complexity_job_state()
-
-      if (!is.data.frame(pending_results) || !nrow(pending_results)) {
-        quick_status("idle")
-        curve_status("idle")
-        mse_status("idle")
-        return(NULL)
-      }
-
-      quick_status("running")
-      curve_status("idle")
-      mse_status("idle")
-      data <- compute_data()
-      params <- parameters()
-      failed_results <- compute_complexity_pending_summary(data, params, status = "failed")
-      run_quick_job(data, params, key, failed_results)
+      ensure_complexity_store()
+      run_next_complexity_batch()
       NULL
+    })
+
+    shiny::observeEvent(input$subject, {
+      req_active_tab(active_tab, "complexity")
+      store <- ensure_complexity_store()
+      store$queue <- subject_queue_reprioritize(store$queue, input$subject)
+      store_state$store <- store
+      bump_progress()
+      bump_display()
+      run_next_complexity_batch()
+      NULL
+    }, ignoreInit = TRUE)
+
+    output$subject_filter <- shiny::renderUI({
+      req_active_tab(active_tab, "complexity")
+      data <- subject_choices_data()
+      if (!subject_id_filter_available(data)) {
+        return(NULL)
+      }
+      ids <- sort(subject_id_values(data))
+      choices <- subject_filter_choices(ids, all_label = "All")
+      shiny::selectInput(
+        session$ns("subject"),
+        "Subject ID",
+        choices = choices,
+        selected = preserve_subject_filter_selection(
+          input$subject,
+          choices,
+          ids
+        )
+      )
+    })
+
+    output$group_filter <- shiny::renderUI({
+      req_active_tab(active_tab, "complexity")
+      data <- all_compute_data()
+      if (!plot_filter_available(data, "group", min_values = 2L)) {
+        return(NULL)
+      }
+      choices <- filter_select_choices(sort(unique(data$group)), all_label = "All")
+      shiny::selectInput(
+        session$ns("group"),
+        "Group",
+        choices = choices,
+        selected = preserve_filter_selection(input$group, choices)
+      )
+    })
+
+    display_data <- shiny::reactive({
+      req_active_tab(active_tab, "complexity")
+      compute_data()
     })
 
     displayed_complexity_results <- shiny::reactive({
-      results <- complexity_metrics()
-      status <- quick_status()
-      if (identical(status, "complete") && is.data.frame(results) && nrow(results)) {
-        return(filter_complexity_results(
-          results,
-          compute_data(),
-          subject = input$subject,
-          group = input$group
-        ))
+      display_version()
+      store <- ensure_complexity_store()
+      selected <- selected_subject()
+      if (identical(selected, all_filter_value())) {
+        return(complexity_aggregate_metrics(store))
       }
-      NULL
-    })
-
-    complexity_output_ids <- c("summary_cards", "metrics_table", "complexity_plot")
-    shiny::observe({
-      req_active_tab(active_tab, "complexity")
-      status <- quick_status()
-      if (identical(status, "running")) {
-        lapply(complexity_output_ids, shinycssloaders::showSpinner)
-      } else {
-        lapply(complexity_output_ids, shinycssloaders::hideSpinner)
-      }
-      NULL
-    })
-
-    complexity_curves <- shiny::reactive({
-      rows <- list(dfa_higuchi_curves(), mse_complexity_curves())
-      rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
-      if (!length(rows)) {
-        return(empty_complexity_curve_rows())
-      }
-      out <- do.call(rbind, rows)
-      row.names(out) <- NULL
-      out
+      complexity_entry_metrics(complexity_store_get(store, normalize_filter_value(selected)))
     })
 
     displayed_complexity_curves <- shiny::reactive({
-      filter_complexity_curves(
-        complexity_curves(),
-        compute_data(),
-        subject = input$subject,
-        group = input$group
-      )
+      display_version()
+      store <- ensure_complexity_store()
+      selected <- selected_subject()
+      if (identical(selected, all_filter_value())) {
+        return(complexity_aggregate_curves(store))
+      }
+      complexity_entry_curves(complexity_store_get(store, normalize_filter_value(selected)))
+    })
+
+    quick_status <- shiny::reactive({
+      display_version()
+      complexity_stage_status(store_state$store, selected_subject(), "quick_status")
+    })
+
+    hurst_status <- shiny::reactive({
+      display_version()
+      complexity_stage_status(store_state$store, selected_subject(), "hurst_status")
+    })
+
+    curve_status <- shiny::reactive({
+      display_version()
+      complexity_stage_status(store_state$store, selected_subject(), "curve_status")
+    })
+
+    mse_status <- shiny::reactive({
+      display_version()
+      complexity_stage_status(store_state$store, selected_subject(), "mse_status")
     })
 
     force_subject_id_display <- shiny::reactive({
       complexity_subject_id_display_override(input$subject)
+    })
+
+    output$complexity_progress <- shiny::renderUI({
+      req_active_tab(active_tab, "complexity")
+      progress_version()
+      text <- complexity_progress_text(store_state$store)
+      if (!nzchar(text)) {
+        return(NULL)
+      }
+      shiny::div(class = "cgm-compact-info-note", text)
     })
 
     output$summary_cards <- shiny::renderUI({

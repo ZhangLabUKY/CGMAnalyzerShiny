@@ -1,7 +1,8 @@
 test_that("apply_imputed_glucose preserves rows and flags only originally missing values", {
   data <- standardize_cgm_data(
     load_example_missing_5pct_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES"),
+    timestamp_parser = "compatibility"
   )
   original_glucose <- data$glucose
   missing_rows <- which(is.na(data$glucose))
@@ -568,7 +569,8 @@ test_that("CGMissingDataR adapter can impute 5 percent missing example when avai
 
   data <- standardize_cgm_data(
     load_example_missing_5pct_cgm_data(),
-    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
+    mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES"),
+    timestamp_parser = "compatibility"
   )
   result <- suppressWarnings(run_cgmissingdata_imputation(data, seed = 42, backend = "mice"))
   imputed <- apply_imputed_glucose(data, result)

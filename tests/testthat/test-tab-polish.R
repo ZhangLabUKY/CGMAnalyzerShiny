@@ -134,6 +134,35 @@ test_that("data upload summary reports compact counts", {
   expect_equal(summary$Value[summary$Label == "Missing glucose"], "1")
 })
 
+test_that("data upload summary uses full dimensions instead of preview sample rows", {
+  upload <- list(
+    data = data.frame(x = seq_len(5000)),
+    files = "large.csv",
+    sampled = TRUE,
+    full_dimensions = data.frame(rows = 3785038, columns = 33)
+  )
+
+  summary <- data_upload_summary(upload)
+  dimensions <- upload_full_dimensions(upload)
+
+  expect_equal(summary$Value[summary$Label == "Rows"], "3,785,038")
+  expect_equal(upload_dimension_label(dimensions$rows, "rows"), "3,785,038 rows")
+  expect_equal(upload_dimension_label(dimensions$columns, "columns"), "33 columns")
+})
+
+test_that("sampled uploads without measured dimensions do not report preview rows as full rows", {
+  upload <- list(
+    data = data.frame(x = seq_len(5000)),
+    files = "large.csv",
+    sampled = TRUE
+  )
+
+  summary <- data_upload_summary(upload)
+
+  expect_equal(summary$Value[summary$Label == "Rows"], "Unknown")
+  expect_equal(upload_dimension_label(upload_full_dimensions(upload)$rows, "rows"), "unknown rows")
+})
+
 test_that("data status strip adds validation state to upload summary", {
   upload <- list(
     data = data.frame(time = "2026-05-05 08:00:00", glucose = 100),
@@ -155,6 +184,32 @@ test_that("data status strip adds validation state to upload summary", {
   expect_equal(summary$Value[summary$Label == "Validation"], "Ready")
   expect_true(grepl("Current dataset", html, fixed = TRUE))
   expect_true(grepl("cgm-data-status-strip", html, fixed = TRUE))
+})
+
+test_that("data status summary counts inferred timestamp gaps as missing glucose", {
+  upload <- list(
+    data = data.frame(time = c("2026-05-05 00:00:00", "2026-05-05 00:20:00"), glucose = c(100, 120)),
+    files = "sample.csv"
+  )
+  mapping <- list(timestamp = "time", glucose = "glucose", source_units = "mg/dL")
+  standardized <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp(c("2026-05-05 00:00:00", "2026-05-05 00:20:00")),
+    glucose = c(100, 120),
+    stringsAsFactors = FALSE
+  )
+
+  summary <- data_status_summary(
+    upload,
+    mapping,
+    standardized,
+    settings = list(
+      analysis_date_range = c(start = "2026-05-05", end = "2026-05-05"),
+      imputation_interval_minutes = 5L
+    )
+  )
+
+  expect_equal(summary$Value[summary$Label == "Missing glucose"], "3")
 })
 
 test_that("app UI includes dynamic version badge and theme CSS", {
@@ -341,11 +396,42 @@ test_that("imputation summary reports combined missing glucose values", {
   expect_equal(summary$missing_glucose, 4)
   expect_equal(summary$explicit_missing_glucose, 1)
   expect_equal(summary$estimated_missing_readings, 3)
-  expect_equal(cards$Value[cards$Label == "Missing glucose values"], "4")
-  expect_false("Explicit missing rows" %in% cards$Label)
-  expect_false("Inferred gap readings" %in% cards$Label)
-  expect_false("Rows after gap expansion" %in% cards$Label)
+  expect_equal(cards$Value[cards$Label == "Missing glucose or inferred gap readings"], "4")
+  expect_equal(cards$Value[cards$Label == "Uploaded blank glucose rows"], "1")
+  expect_equal(cards$Value[cards$Label == "Inferred timestamp-gap readings"], "3")
   expect_true(grepl("missing glucose values", summary$message, fixed = TRUE))
+})
+
+test_that("imputation summary reviews timestamp gaps by default", {
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 00:00:00",
+      "2026-05-05 00:05:00",
+      "2026-05-05 00:10:00",
+      "2026-05-05 00:30:00"
+    )),
+    glucose = c(100, NA, 120, 130),
+    stringsAsFactors = FALSE
+  )
+
+  summary <- imputation_missingness_summary(data, include_timestamp_gaps = FALSE)
+  fast_summary <- imputation_missingness_summary(data)
+  cards <- imputation_summary_cards(summary)
+  fast_cards <- imputation_summary_cards(fast_summary)
+  html <- paste(as.character(imputation_summary_box_ui(fast_summary)), collapse = "\n")
+
+  expect_false(isTRUE(attr(summary, "include_timestamp_gaps", exact = TRUE)))
+  expect_equal(summary$missing_glucose, 1)
+  expect_equal(summary$explicit_missing_glucose, 1)
+  expect_true(is.na(summary$estimated_missing_readings))
+  expect_equal(cards$Value[cards$Label == "Uploaded blank glucose rows"], "1")
+  expect_equal(cards$Value[cards$Label == "Inferred timestamp-gap readings"], "Not included")
+  expect_true(isTRUE(attr(fast_summary, "include_timestamp_gaps", exact = TRUE)))
+  expect_equal(fast_summary$missing_glucose, 4)
+  expect_equal(fast_summary$estimated_missing_readings, 3)
+  expect_equal(fast_cards$Value[fast_cards$Label == "Inferred timestamp-gap readings"], "3")
+  expect_true(grepl("Missing glucose values include uploaded blank glucose values", html, fixed = TRUE))
 })
 
 test_that("imputation summary includes per-subject rows for multiple Subject IDs", {
@@ -488,6 +574,83 @@ test_that("preprocessing module returns explicit imputation settings through tes
       set_status <- attr(settings, "set_imputation_status", exact = TRUE)
       set_status(list(state = "stale", message = "Changed inputs require another imputation run."))
       expect_equal(attr(settings, "imputation_status", exact = TRUE)()$state, "stale")
+    }
+  )
+})
+
+test_that("preprocessing imputation panel reviews gaps when imputation is none", {
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp(c("2026-05-05 00:00:00", "2026-05-05 00:20:00")),
+    glucose = c(100, 120),
+    stringsAsFactors = FALSE
+  )
+  mapping <- list(
+    timestamp = "timestamp",
+    glucose = "glucose",
+    source_units = "mg/dL",
+    upload_mode = "single_file"
+  )
+
+  shiny::testServer(
+    preprocessing_module_server,
+    args = list(
+      mapping = shiny::reactive(mapping),
+      standardized = shiny::reactive(data)
+    ),
+    {
+      session$setInputs(
+        analysis_date_range = as.Date(c("2026-05-05", "2026-05-05")),
+        imputation = "none"
+      )
+      html <- paste(as.character(output$imputation_summary), collapse = "\n")
+
+      expect_true(grepl("Inferred timestamp-gap readings", html, fixed = TRUE))
+      expect_true(grepl(">3<", html, fixed = TRUE))
+      expect_true(grepl("Missing glucose values include uploaded blank glucose values", html, fixed = TRUE))
+    }
+  )
+})
+
+test_that("preprocessing imputation panel reuses shared missingness review", {
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp(c("2026-05-05 00:00:00", "2026-05-05 00:20:00")),
+    glucose = c(100, 120),
+    stringsAsFactors = FALSE
+  )
+  mapping <- list(
+    timestamp = "timestamp",
+    glucose = "glucose",
+    source_units = "mg/dL",
+    upload_mode = "single_file"
+  )
+  shared <- new.env(parent = emptyenv())
+  calls <- 0L
+  shared$analysis_missingness_review <- shiny::reactive({
+    calls <<- calls + 1L
+    imputation_missingness_summary(data)
+  })
+
+  shiny::testServer(
+    preprocessing_module_server,
+    args = list(
+      mapping = shiny::reactive(mapping),
+      standardized = shiny::reactive(data),
+      shared_missingness = shared
+    ),
+    {
+      session$setInputs(
+        analysis_date_range = as.Date(c("2026-05-05", "2026-05-05")),
+        imputation = "none"
+      )
+      html <- paste(as.character(output$imputation_summary), collapse = "\n")
+      session$setInputs(imputation = "mice_only")
+      html_after_method_change <- paste(as.character(output$imputation_summary), collapse = "\n")
+
+      expect_true(grepl("Inferred timestamp-gap readings", html, fixed = TRUE))
+      expect_true(grepl("Inferred timestamp-gap readings", html_after_method_change, fixed = TRUE))
+      expect_equal(calls, 1L)
     }
   )
 })

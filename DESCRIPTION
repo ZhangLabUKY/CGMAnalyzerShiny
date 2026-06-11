@@ -22,21 +22,26 @@ Imports:
     CGManalyzer,
     CGMissingDataR (>= 0.0.2),
     iglu,
-    dplyr,
     DT,
     future,
+    fasttime,
     ggplot2,
     later,
+    lubridate,
     plotly,
     pracma,
     promises,
+    Rcpp,
     readr,
     readxl,
     shiny,
     shinycssloaders,
     stats,
+    stringi,
     tools,
     utils
+LinkingTo:
+    Rcpp
 Suggests:
     testthat (>= 3.0.0),
     spelling, 
@@ -44,6 +49,5 @@ Suggests:
     rmarkdown, 
     devtools
 Config/testthat/edition: 3
-LazyData: true
 URL: https://github.com/ZhangLabUKY/CGMAnalyzerShiny
 BugReports: https://github.com/ZhangLabUKY/CGMAnalyzerShiny/issues

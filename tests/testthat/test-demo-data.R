@@ -53,7 +53,8 @@ test_that("bundled examples standardize with colon timestamps and expected missi
   for (example in examples) {
     standardized <- standardize_cgm_data(
       example$data,
-      mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES")
+      mapping = list(id = "USUBJID", timestamp = "Time", glucose = "LBORRES"),
+      timestamp_parser = "compatibility"
     )
     qc <- compute_qc_summary(standardized)
     metrics <- compute_core_metrics(standardized)
@@ -92,7 +93,8 @@ test_that("missingness examples can prefill SEX as subject metadata", {
           list(upload_mode = "single_file", data = example),
           id_mapping = "USUBJID"
         )
-      )
+      ),
+      timestamp_parser = "compatibility"
     )
 
     expect_true("sex" %in% names(standardized))

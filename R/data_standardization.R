@@ -6,6 +6,10 @@ optional_cgm_columns <- function() {
   c("device")
 }
 
+upload_mapping_sample_row_limit <- function() {
+  5000L
+}
+
 clean_mapping_value <- function(x) {
   if (
     is.null(x) || length(x) == 0L || is.na(x[[1L]]) || identical(x[[1L]], "")
@@ -32,6 +36,16 @@ standardize_upload_mapping <- function(mapping, upload_mode = "single_file") {
     mapping$id <- ".source_id"
   }
   mapping
+}
+
+selected_upload_columns <- function(mapping, upload_mode = "single_file") {
+  mapping <- standardize_upload_mapping(mapping, upload_mode = upload_mode)
+  columns <- unname(unlist(mapping[c(required_cgm_columns(), optional_cgm_columns())], use.names = FALSE))
+  columns <- clean_filter_values(columns)
+  if (identical(upload_mode, "multi_file")) {
+    columns <- setdiff(columns, ".source_id")
+  }
+  unique(columns)
 }
 
 validate_mapping <- function(data, mapping, upload_mode = "single_file") {
@@ -106,11 +120,16 @@ apply_subject_metadata <- function(data, metadata) {
   if (!length(metadata_cols) || !nrow(data) || !"id" %in% names(data)) {
     return(data)
   }
-  matched <- match(as.character(data$id), metadata$id)
-  for (col in metadata_cols) {
-    data[[col]] <- metadata[[col]][matched]
+  dt <- data.table::as.data.table(data)
+  metadata_dt <- data.table::as.data.table(metadata)
+  dt[, id := as.character(id)]
+  metadata_dt[, id := as.character(id)]
+  data.table::setkeyv(metadata_dt, "id")
+  dt[metadata_dt, on = "id", (metadata_cols) := mget(paste0("i.", metadata_cols))]
+  if (!data.table::is.data.table(data)) {
+    data.table::setDF(dt)
   }
-  data
+  dt
 }
 
 #' Parse CGM timestamps
@@ -122,7 +141,104 @@ apply_subject_metadata <- function(data, metadata) {
 #'
 #' @return POSIXct vector.
 #' @noRd
-parse_cgm_timestamp <- function(x, tz = "UTC", date_order = "dmy") {
+timestamp_year_first_formats <- function() {
+  c(
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%Y:%m:%d:%H:%M:%S",
+    "%Y:%m:%d:%H:%M",
+    "%Y-%m-%d %I:%M:%S %p",
+    "%Y-%m-%d %I:%M %p",
+    "%Y/%m/%d %H:%M:%S",
+    "%Y/%m/%d %H:%M",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M",
+    "%Y-%m-%dT%H:%M:%OS",
+    "%Y-%m-%dT%H:%M:%OSZ",
+    "%Y-%m-%dT%H:%M:%OS%z"
+  )
+}
+
+detect_fast_timestamp_format <- function(x_chr, date_order = "dmy", sample_size = 300L, tz = "UTC") {
+  candidates <- c(
+    timestamp_year_first_formats(),
+    timestamp_date_order_formats(date_order),
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    timestamp_date_only_formats(date_order)
+  )
+  sample <- x_chr[!is.na(x_chr)]
+  if (!length(sample)) {
+    return(NA_character_)
+  }
+  sample <- sample[seq_len(min(length(sample), sample_size))]
+  for (fmt in candidates) {
+    parsed <- lubridate_fast_strptime(sample, fmt, tz = tz)
+    if (all(!is.na(parsed))) {
+      return(fmt)
+    }
+  }
+  NA_character_
+}
+
+timestamp_parser_mode <- function(parser = NULL) {
+  parser <- parser %||% getOption("CGMA.timestamp_parser", "fasttime")
+  parser <- tolower(trimws(as.character(parser[[1L]] %||% "fasttime")))
+  if (!parser %in% c("fasttime", "compatibility")) {
+    parser <- "fasttime"
+  }
+  parser
+}
+
+fast_parse_cgm_timestamp <- function(x_chr, date_order = "dmy", tz = "UTC", allow_lubridate = FALSE) {
+  fasttime_result <- fasttime_parse_cgm_timestamp(x_chr, tz = tz)
+  if (!is.null(fasttime_result)) {
+    return(fasttime_result)
+  }
+
+  if (!isTRUE(allow_lubridate)) {
+    return(NULL)
+  }
+
+  fmt <- detect_fast_timestamp_format(x_chr, date_order = date_order, tz = tz)
+  if (is.na(fmt)) {
+    return(NULL)
+  }
+  parsed <- rep(
+    as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz),
+    length(x_chr)
+  )
+  idx <- !is.na(x_chr)
+  attempt <- lubridate_fast_strptime(x_chr[idx], fmt, tz = tz)
+  parsed[idx] <- attempt
+  parsed
+}
+
+fasttime_parse_cgm_timestamp <- function(x_chr, tz = "UTC") {
+  if (!requireNamespace("fasttime", quietly = TRUE)) {
+    return(NULL)
+  }
+  idx <- !is.na(x_chr)
+  if (!any(idx)) {
+    return(NULL)
+  }
+  strict <- idx & grepl(
+    "^\\d{4}\\D+\\d{1,2}\\D+\\d{1,2}",
+    x_chr
+  )
+  if (!any(strict)) {
+    return(NULL)
+  }
+  parsed <- rep(
+    as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz),
+    length(x_chr)
+  )
+  attempt <- fasttime::fastPOSIXct(x_chr[strict], tz = tz)
+  parsed[strict] <- attempt
+  parsed
+}
+
+parse_cgm_timestamp <- function(x, tz = "UTC", date_order = "dmy", timestamp_parser = NULL) {
   if (inherits(x, "POSIXct")) {
     return(x)
   }
@@ -140,11 +256,27 @@ parse_cgm_timestamp <- function(x, tz = "UTC", date_order = "dmy") {
   x_chr <- trimws(as.character(x))
   x_chr[x_chr == ""] <- NA_character_
   date_order <- clean_timestamp_date_order(date_order)
+  parser <- timestamp_parser_mode(timestamp_parser)
 
   parsed <- rep(
     as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz),
     length(x_chr)
   )
+
+  fast <- fast_parse_cgm_timestamp(
+    x_chr,
+    date_order = date_order,
+    tz = tz,
+    allow_lubridate = identical(parser, "compatibility")
+  )
+  if (!is.null(fast)) {
+    fast_fill <- !is.na(fast)
+    parsed[fast_fill] <- fast[fast_fill]
+    if (all(is.na(x_chr) | !is.na(parsed))) {
+      return(parsed)
+    }
+  }
+
   numeric_idx <- !is.na(x_chr) & grepl("^\\d+(\\.\\d+)?$", x_chr)
   numeric_values <- suppressWarnings(as.numeric(x_chr[numeric_idx]))
   excel_idx <- numeric_idx
@@ -159,23 +291,11 @@ parse_cgm_timestamp <- function(x, tz = "UTC", date_order = "dmy") {
     )
   }
 
-  year_first_formats <- c(
-    "%Y-%m-%d %H:%M:%S",
-    "%Y-%m-%d %H:%M",
-    "%Y:%m:%d:%H:%M:%S",
-    "%Y:%m:%d:%H:%M",
-    "%Y-%m-%d %I:%M:%S %p",
-    "%Y-%m-%d %I:%M %p",
-    "%Y/%m/%d %H:%M:%S",
-    "%Y/%m/%d %H:%M",
-    "%Y-%m-%dT%H:%M:%S",
-    "%Y-%m-%dT%H:%M",
-    "%Y-%m-%dT%H:%M:%OS",
-    "%Y-%m-%dT%H:%M:%OSZ",
-    "%Y-%m-%dT%H:%M:%OS%z"
-  )
+  if (identical(parser, "fasttime")) {
+    return(parsed)
+  }
 
-  parsed <- parse_with_formats(x_chr, parsed, year_first_formats, tz = tz)
+  parsed <- parse_with_formats(x_chr, parsed, timestamp_year_first_formats(), tz = tz)
 
   day_month_formats <- timestamp_date_order_formats(date_order)
   parseable_non_year_first <- !is.na(x_chr) & is.na(parsed)
@@ -269,12 +389,25 @@ parse_with_formats <- function(x_chr, parsed, formats, tz = "UTC", idx = NULL) {
     if (!any(remaining)) {
       break
     }
-    attempt <- as.POSIXct(strptime(x_chr[remaining], format = fmt, tz = tz))
+    attempt <- lubridate_fast_strptime(x_chr[remaining], fmt, tz = tz)
     fill <- !is.na(attempt)
     parsed[which(remaining)[fill]] <- attempt[fill]
     remaining[which(remaining)[fill]] <- FALSE
   }
   parsed
+}
+
+lubridate_fast_strptime <- function(x, fmt, tz = "UTC") {
+  if (!requireNamespace("lubridate", quietly = TRUE)) {
+    return(rep(
+      as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz),
+      length(x)
+    ))
+  }
+  suppressWarnings(as.POSIXct(
+    lubridate::fast_strptime(x, format = fmt, tz = tz),
+    tz = tz
+  ))
 }
 
 detect_ambiguous_timestamps <- function(x) {
@@ -308,7 +441,7 @@ detect_ambiguous_timestamps <- function(x) {
 }
 
 timestamp_parse_summary <- function(x, tz = "UTC", date_order = "dmy") {
-  parsed <- parse_cgm_timestamp(x, tz = tz, date_order = date_order)
+  parsed <- parse_cgm_timestamp(x, tz = tz, date_order = date_order, timestamp_parser = "compatibility")
   non_missing <- !is.na(trimws(as.character(x))) &
     nzchar(trimws(as.character(x)))
   data.frame(
@@ -388,7 +521,14 @@ validate_parsed_timestamps <- function(raw_timestamp, parsed_timestamp) {
 }
 
 coerce_glucose <- function(x) {
-  as.numeric(gsub(",", "", as.character(x), fixed = TRUE))
+  if (is.numeric(x) || is.integer(x)) {
+    return(as.numeric(x))
+  }
+  x_chr <- as.character(x)
+  if (any(grepl(",", x_chr, fixed = TRUE), na.rm = TRUE)) {
+    x_chr <- stringi::stri_replace_all_fixed(x_chr, ",", "")
+  }
+  as.numeric(x_chr)
 }
 
 convert_glucose_to_mg_dl <- function(glucose, units) {
@@ -418,51 +558,113 @@ standardize_cgm_data <- function(
   source_file = NA_character_,
   tz = "UTC",
   upload_mode = "single_file",
-  timestamp_date_order = "dmy"
+  timestamp_date_order = "dmy",
+  timestamp_parser = "compatibility"
 ) {
   data <- as.data.frame(data, stringsAsFactors = FALSE)
   id_source <- determine_id_source(data, mapping, upload_mode = upload_mode)
   mapping <- validate_mapping(data, mapping, upload_mode = upload_mode)
-  timestamp <- parse_cgm_timestamp(
-    data[[mapping$timestamp]],
-    tz = tz,
-    date_order = timestamp_date_order
+  timestamp <- cgm_timed(
+    "standardization_timestamp_parse",
+    parse_cgm_timestamp(
+      data[[mapping$timestamp]],
+      tz = tz,
+      date_order = timestamp_date_order,
+      timestamp_parser = timestamp_parser
+    ),
+    rows = nrow(data),
+    context = list(upload_mode = upload_mode)
   )
   validate_parsed_timestamps(data[[mapping$timestamp]], timestamp)
 
-  out <- data.frame(
-    id = as.character(data[[mapping$id]]),
-    id_source = id_source,
-    timestamp = timestamp,
-    glucose = convert_glucose_to_mg_dl(
+  glucose <- cgm_timed(
+    "standardization_glucose_convert",
+    convert_glucose_to_mg_dl(
       coerce_glucose(data[[mapping$glucose]]),
       units
     ),
+    rows = nrow(data),
+    context = list(upload_mode = upload_mode)
+  )
+
+  out <- data.table::data.table(
+    id = as.character(data[[mapping$id]]),
+    id_source = id_source,
+    timestamp = timestamp,
+    glucose = glucose,
     units = "mg/dL",
     device = NA_character_,
     source_file = source_file,
-    imputed_flag = FALSE,
-    stringsAsFactors = FALSE
+    imputed_flag = FALSE
   )
 
   for (col in optional_cgm_columns()) {
     mapped <- clean_mapping_value(mapping[[col]])
     if (!is.na(mapped)) {
-      out[[col]] <- as.character(data[[mapped]])
+      data.table::set(out, j = col, value = as.character(data[[mapped]]))
     }
   }
-  out <- apply_subject_metadata(out, mapping$subject_metadata)
+  out <- cgm_timed(
+    "standardization_metadata_apply",
+    apply_subject_metadata(out, mapping$subject_metadata),
+    rows = nrow(out),
+    context = list(upload_mode = upload_mode)
+  )
 
   if (".source_file" %in% names(data)) {
-    out$source_file <- as.character(data[[".source_file"]])
+    data.table::set(out, j = "source_file", value = as.character(data[[".source_file"]]))
   }
 
-  out <- out[order(out$id, out$timestamp, na.last = TRUE), , drop = FALSE]
+  out <- cgm_timed(
+    "standardization_sort",
+    {
+      data.table::setorder(out, id, timestamp, na.last = TRUE)
+      out
+    },
+    rows = nrow(out),
+    context = list(upload_mode = upload_mode)
+  )
+  data.table::setDF(out)
   row.names(out) <- NULL
-  out
+  cgm_timed(
+    "standardization_signature",
+    attach_cgm_data_signature(out),
+    rows = nrow(out),
+    context = list(upload_mode = upload_mode)
+  )
 }
 
-read_cgm_file <- function(datapath, filename, header_row = 1L, first_data_row = NULL) {
+resolve_import_select_columns <- function(datapath, filename, header_row = 1L, select_columns = NULL) {
+  if (is.null(select_columns) || !length(select_columns)) {
+    return(NULL)
+  }
+  ext <- tolower(tools::file_ext(filename))
+  if (!ext %in% c("csv", "txt")) {
+    return(select_columns)
+  }
+  header <- data.table::fread(
+    datapath,
+    sep = cgm_fread_separator(filename),
+    skip = header_row - 1L,
+    header = TRUE,
+    nrows = 0L,
+    fill = TRUE,
+    data.table = FALSE,
+    showProgress = FALSE
+  )
+  raw_names <- names(header)
+  cleaned <- clean_import_column_names(raw_names)
+  raw_names[cleaned %in% select_columns]
+}
+
+read_cgm_file <- function(
+  datapath,
+  filename,
+  header_row = 1L,
+  first_data_row = NULL,
+  select_columns = NULL,
+  nrows = NULL
+) {
   ext <- tolower(tools::file_ext(filename))
   header_row <- suppressWarnings(as.integer(header_row %||% 1L))
   if (is.na(header_row) || header_row < 1L) {
@@ -471,9 +673,16 @@ read_cgm_file <- function(datapath, filename, header_row = 1L, first_data_row = 
   first_data_row <- normalize_first_data_row(header_row, first_data_row %||% (header_row + 1L))
   skip_rows <- header_row - 1L
   drop_after_header <- first_data_row - header_row - 1L
+  read_nrows <- if (is.null(nrows)) NULL else as.integer(nrows) + drop_after_header
   if (ext %in% c("csv", "txt")) {
-    data <- data.table::fread(
+    resolved_select <- resolve_import_select_columns(
       datapath,
+      filename,
+      header_row = header_row,
+      select_columns = select_columns
+    )
+    fread_args <- list(
+      file = datapath,
       sep = cgm_fread_separator(filename),
       skip = skip_rows,
       header = TRUE,
@@ -481,16 +690,30 @@ read_cgm_file <- function(datapath, filename, header_row = 1L, first_data_row = 
       data.table = FALSE,
       showProgress = FALSE
     )
+    if (!is.null(resolved_select) && length(resolved_select)) {
+      fread_args$select <- resolved_select
+    }
+    if (!is.null(read_nrows)) {
+      fread_args$nrows <- read_nrows
+    }
+    data <- do.call(data.table::fread, fread_args)
   } else if (ext %in% c("xlsx", "xls")) {
     if (!requireNamespace("readxl", quietly = TRUE)) {
       stop("Package 'readxl' is required to read Excel files.", call. = FALSE)
     }
-    data <- readxl::read_excel(
-      datapath,
+    readxl_args <- list(
+      path = datapath,
       skip = skip_rows,
       col_names = TRUE,
       .name_repair = "minimal"
     )
+    if (!is.null(read_nrows)) {
+      readxl_args$n_max <- read_nrows
+    }
+    data <- do.call(readxl::read_excel, readxl_args)
+    if (!is.null(select_columns)) {
+      data <- data[, intersect(select_columns, names(data)), drop = FALSE]
+    }
   } else {
     stop("Unsupported file type: ", ext, call. = FALSE)
   }
@@ -507,24 +730,90 @@ read_cgm_file <- function(datapath, filename, header_row = 1L, first_data_row = 
   data
 }
 
-combine_uploaded_files <- function(datapaths, filenames, header_rows = NULL, first_data_rows = NULL) {
+read_cgm_file_dimensions <- function(datapath, filename, header_row = 1L, first_data_row = NULL) {
+  ext <- tolower(tools::file_ext(filename))
+  if (!ext %in% c("csv", "txt")) {
+    data <- read_cgm_file(
+      datapath,
+      filename,
+      header_row = header_row,
+      first_data_row = first_data_row,
+      select_columns = NULL,
+      nrows = upload_mapping_sample_row_limit()
+    )
+    return(c(rows = NA_integer_, columns = max(0L, ncol(data) - 4L)))
+  }
+  header_row <- suppressWarnings(as.integer(header_row %||% 1L))
+  if (is.na(header_row) || header_row < 1L) {
+    header_row <- 1L
+  }
+  first_data_row <- normalize_first_data_row(header_row, first_data_row %||% (header_row + 1L))
+  header <- data.table::fread(
+    datapath,
+    sep = cgm_fread_separator(filename),
+    skip = header_row - 1L,
+    header = TRUE,
+    nrows = 0L,
+    fill = TRUE,
+    data.table = FALSE,
+    showProgress = FALSE
+  )
+  if (!length(names(header))) {
+    return(c(rows = 0L, columns = 0L))
+  }
+  first_column <- names(header)[[1L]]
+  rows <- nrow(data.table::fread(
+    datapath,
+    sep = cgm_fread_separator(filename),
+    skip = header_row - 1L,
+    header = TRUE,
+    select = first_column,
+    fill = TRUE,
+    data.table = FALSE,
+    showProgress = FALSE
+  ))
+  rows <- max(0L, rows - (first_data_row - header_row - 1L))
+  c(rows = rows, columns = length(names(header)))
+}
+
+combine_uploaded_files <- function(
+  datapaths,
+  filenames,
+  header_rows = NULL,
+  first_data_rows = NULL,
+  select_columns = NULL,
+  nrows = NULL
+) {
   if (is.null(header_rows)) {
     header_rows <- rep(1L, length(datapaths))
   }
   if (is.null(first_data_rows)) {
     first_data_rows <- header_rows + 1L
   }
-  data_list <- Map(read_cgm_file, datapaths, filenames, header_rows, first_data_rows)
+  data_list <- Map(
+    function(datapath, filename, header_row, first_data_row) {
+      read_cgm_file(
+        datapath,
+        filename,
+        header_row = header_row,
+        first_data_row = first_data_row,
+        select_columns = select_columns,
+        nrows = nrows
+      )
+    },
+    datapaths,
+    filenames,
+    header_rows,
+    first_data_rows
+  )
   if (!compatible_uploaded_schemas(data_list)) {
     stop(
       "Uploaded files use different resolved column names. Review header rows or upload one device/schema group at a time.",
       call. = FALSE
     )
   }
-  combined <- dplyr::bind_rows(lapply(data_list, function(x) {
-    x[] <- lapply(x, as.character)
-    x
-  }))
+  combined <- data.table::rbindlist(data_list, use.names = TRUE, fill = TRUE)
+  combined <- as.data.frame(combined, stringsAsFactors = FALSE)
   row.names(combined) <- NULL
   combined
 }
