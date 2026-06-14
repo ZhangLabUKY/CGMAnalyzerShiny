@@ -181,6 +181,27 @@ detect_fast_timestamp_format <- function(x_chr, date_order = "dmy", sample_size 
   NA_character_
 }
 
+timestamp_sample_values <- function(x_chr, sample_size = 300L) {
+  sample_size <- suppressWarnings(as.integer(sample_size %||% 300L))
+  if (is.na(sample_size) || sample_size < 1L) {
+    sample_size <- 300L
+  }
+  sample <- x_chr[!is.na(x_chr)]
+  if (!length(sample)) {
+    return(character())
+  }
+  sample[seq_len(min(length(sample), sample_size))]
+}
+
+likely_year_first_timestamp <- function(x_chr) {
+  x_chr <- as.character(x_chr)
+  enough <- !is.na(x_chr) & nchar(x_chr) >= 4L
+  out <- rep(FALSE, length(x_chr))
+  year <- suppressWarnings(as.integer(substr(x_chr[enough], 1L, 4L)))
+  out[enough] <- !is.na(year) & year >= 1900L & year <= 2200L
+  out
+}
+
 timestamp_parser_mode <- function(parser = NULL) {
   parser <- parser %||% getOption("CGMA.timestamp_parser", "fasttime")
   parser <- tolower(trimws(as.character(parser[[1L]] %||% "fasttime")))
@@ -222,19 +243,25 @@ fasttime_parse_cgm_timestamp <- function(x_chr, tz = "UTC") {
   if (!any(idx)) {
     return(NULL)
   }
-  strict <- idx & grepl(
-    "^\\d{4}\\D+\\d{1,2}\\D+\\d{1,2}",
-    x_chr
-  )
-  if (!any(strict)) {
+  sample <- timestamp_sample_values(x_chr, sample_size = 300L)
+  sample_year_first <- likely_year_first_timestamp(sample)
+  if (!any(sample_year_first)) {
+    return(NULL)
+  }
+  sample_attempt <- fasttime::fastPOSIXct(sample[sample_year_first], tz = tz)
+  if (!length(sample_attempt) || mean(!is.na(sample_attempt)) < 0.8) {
+    return(NULL)
+  }
+  parse_idx <- idx & likely_year_first_timestamp(x_chr)
+  if (!any(parse_idx)) {
     return(NULL)
   }
   parsed <- rep(
     as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz),
     length(x_chr)
   )
-  attempt <- fasttime::fastPOSIXct(x_chr[strict], tz = tz)
-  parsed[strict] <- attempt
+  attempt <- fasttime::fastPOSIXct(x_chr[parse_idx], tz = tz)
+  parsed[parse_idx] <- attempt
   parsed
 }
 
@@ -440,17 +467,26 @@ detect_ambiguous_timestamps <- function(x) {
   out
 }
 
-timestamp_parse_summary <- function(x, tz = "UTC", date_order = "dmy") {
-  parsed <- parse_cgm_timestamp(x, tz = tz, date_order = date_order, timestamp_parser = "compatibility")
-  non_missing <- !is.na(trimws(as.character(x))) &
-    nzchar(trimws(as.character(x)))
+timestamp_parse_summary <- function(x, tz = "UTC", date_order = "dmy", sample_size = 5000L) {
+  x_chr <- trimws(as.character(x))
+  x_chr[x_chr == ""] <- NA_character_
+  sample_size <- suppressWarnings(as.integer(sample_size %||% 5000L))
+  if (is.na(sample_size) || sample_size < 1L) {
+    sample_size <- 5000L
+  }
+  sample_idx <- seq_len(min(length(x_chr), sample_size))
+  x_sample <- x_chr[sample_idx]
+  parsed <- parse_cgm_timestamp(x_sample, tz = tz, date_order = date_order, timestamp_parser = "compatibility")
+  non_missing <- !is.na(x_sample) & nzchar(x_sample)
   data.frame(
     rows = length(x),
+    sampled_rows = length(x_sample),
+    sample_based = length(x_sample) < length(x_chr),
     non_missing_timestamps = sum(non_missing),
     parsed_timestamps = sum(!is.na(parsed)),
     failed_timestamps = sum(non_missing & is.na(parsed)),
-    ambiguous_timestamps = sum(detect_ambiguous_timestamps(x)),
-    date_only_timestamps = sum(detect_date_only_timestamps(x)),
+    ambiguous_timestamps = sum(detect_ambiguous_timestamps(x_sample)),
+    date_only_timestamps = sum(detect_date_only_timestamps(x_sample)),
     first_timestamp = if (any(!is.na(parsed))) {
       min(parsed, na.rm = TRUE)
     } else {
@@ -819,7 +855,7 @@ combine_uploaded_files <- function(
 }
 
 load_extdata_csv <- function(filename, missing_message) {
-  demo_path <- system.file("extdata", filename, package = "CGMAnalyzerShiny")
+  demo_path <- system.file("extdata", filename, package = app_package_name())
   if (!nzchar(demo_path)) {
     candidates <- c(
       file.path("inst", "extdata", filename),

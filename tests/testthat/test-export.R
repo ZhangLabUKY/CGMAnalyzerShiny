@@ -45,3 +45,71 @@ test_that("export payload helpers produce user-facing data products", {
   ))
   expect_false(any(grepl("_", names(qc_export), fixed = TRUE)))
 })
+
+test_that("fwrite export path preserves user-facing CSV columns", {
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp("2026-05-05 08:00:00"),
+    glucose = 100,
+    units = "mg/dL",
+    device = NA_character_,
+    source_file = "A.csv",
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+  file <- tempfile(fileext = ".csv")
+
+  data.table::fwrite(prepare_cgm_data_export(data), file)
+  out <- utils::read.csv(file, stringsAsFactors = FALSE, check.names = FALSE)
+
+  expect_equal(names(out), names(prepare_cgm_data_export(data)))
+  expect_equal(out$timestamp, "2026-05-05T08:00:00")
+  expect_false("row.names" %in% names(out))
+})
+
+test_that("metrics export includes selected-on-demand cache coverage", {
+  data <- data.frame(
+    id = c("A", "A", "B"),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 08:00:00",
+      "2026-05-05 08:05:00",
+      "2026-05-06 08:00:00"
+    )),
+    glucose = c(100, 110, 120),
+    group = c("Control", "Control", "Treatment"),
+    stringsAsFactors = FALSE
+  )
+  metrics <- compute_base_core_metrics(data[data$id == "A", , drop = FALSE])
+
+  export <- prepare_metrics_cached_export(metrics, data, thresholds = default_cgm_thresholds())
+  status <- export[export$Metric == "Metrics cache status", , drop = FALSE]
+
+  expect_true(nrow(export) > nrow(prepare_metrics_display(metrics, show_subject_id = TRUE)))
+  expect_equal(status$Value[status$`Subject ID` == "A"], "Generated")
+  expect_equal(status$Value[status$`Subject ID` == "B"], "Not generated")
+})
+
+test_that("complexity export includes selected-on-demand cache coverage", {
+  data <- data.frame(
+    id = c("A", "A", "B", "B"),
+    timestamp = parse_cgm_timestamp(rep(c("2026-05-05 08:00:00", "2026-05-05 08:05:00"), 2)),
+    glucose = c(100, 110, 120, 130),
+    group = rep(c("Control", "Treatment"), each = 2),
+    stringsAsFactors = FALSE
+  )
+  params <- complexity_default_parameters(min_points = 2)
+  results <- compute_complexity_quick_metrics(data[data$id == "A", , drop = FALSE], params)
+
+  export <- prepare_complexity_cached_export(
+    results,
+    empty_complexity_curve_rows(),
+    data,
+    generated_ids = "A",
+    show_subject_id = TRUE
+  )
+  status <- export[export$Metric == "Complexity cache status", , drop = FALSE]
+
+  expect_equal(status$Value[status$`Subject ID` == "A"], "Generated")
+  expect_equal(status$Value[status$`Subject ID` == "B"], "Not generated")
+  expect_true(all(c("Output", "Derived scalar", "Derived scalar value") %in% names(export)))
+})

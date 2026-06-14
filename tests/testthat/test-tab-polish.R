@@ -64,6 +64,134 @@ test_that("timestamp validation summary reports parsed, invalid, and ambiguous v
   expect_true(any(grepl("day-first", warnings, fixed = TRUE)))
 })
 
+test_that("timestamp validation summary keeps full row count with sample diagnostics", {
+  upload <- list(
+    data = data.frame(time = c(rep("2026-05-05 08:00:00", 5000), "bad time")),
+    files = "sample.csv"
+  )
+  mapping <- list(timestamp = "time", glucose = "glucose")
+
+  summary <- timestamp_validation_summary(upload, mapping)
+  display <- timestamp_summary_display(summary)
+
+  expect_equal(summary$rows, 5001)
+  expect_equal(summary$sampled_rows, 5000)
+  expect_true(summary$sample_based)
+  expect_equal(summary$failed_timestamps, 0)
+  expect_equal(display$Value[display$Label == "Diagnostic sample"], "5,000")
+})
+
+test_that("validation summaries prefer full standardized data over upload preview", {
+  upload <- list(
+    data = data.frame(
+      time = rep("2026-05-05 08:00:00", 5000),
+      glucose = rep("100", 5000)
+    ),
+    files = "sample.csv",
+    sampled = TRUE
+  )
+  mapping <- list(timestamp = "time", glucose = "glucose")
+  standardized <- data.frame(
+    id = "A",
+    timestamp = as.POSIXct("2026-05-05 08:00:00", tz = "UTC") + seq(0, by = 300, length.out = 5001),
+    glucose = c(rep(100, 5000), NA_real_),
+    stringsAsFactors = FALSE
+  )
+
+  timestamp <- timestamp_validation_summary(upload, mapping, standardized_data = standardized)
+  glucose <- glucose_validation_summary(upload, mapping, standardized_data = standardized)
+  timestamp_display <- timestamp_summary_display(timestamp)
+
+  expect_equal(timestamp$rows, 5001)
+  expect_false(timestamp$sample_based)
+  expect_false("Diagnostic sample" %in% timestamp_display$Label)
+  expect_equal(glucose$rows, 5001)
+  expect_equal(glucose$missing_glucose, 1)
+})
+
+test_that("validation summaries use full expected readings when missingness review is available", {
+  standardized <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 00:00:00",
+      "2026-05-05 00:05:00",
+      "2026-05-05 00:10:00",
+      "2026-05-05 00:30:00"
+    )),
+    glucose = c(100, NA, 120, 130),
+    stringsAsFactors = FALSE
+  )
+  upload <- list(data = standardized[, c("timestamp", "glucose")], files = "sample.csv")
+  mapping <- list(timestamp = "timestamp", glucose = "glucose")
+  missingness <- imputation_missingness_summary(standardized)
+
+  timestamp <- timestamp_validation_summary(upload, mapping, standardized_data = standardized)
+  glucose <- glucose_validation_summary(upload, mapping, standardized_data = standardized)
+  timestamp_display <- timestamp_summary_display(timestamp, missingness_review = missingness)
+  glucose_display <- glucose_summary_display(glucose, missingness_review = missingness)
+
+  expect_equal(timestamp_display$Value[timestamp_display$Label == "Expected readings reviewed"], "7")
+  expect_equal(timestamp_display$Value[timestamp_display$Label == "Uploaded parsed timestamps"], "4")
+  expect_equal(timestamp_display$Value[timestamp_display$Label == "Inferred timestamp-gap readings"], "3")
+  expect_false("Rows" %in% timestamp_display$Label)
+  expect_equal(glucose_display$Value[glucose_display$Label == "Expected readings reviewed"], "7")
+  expect_equal(glucose_display$Value[glucose_display$Label == "Available numeric glucose"], "3")
+  expect_equal(glucose_display$Value[glucose_display$Label == "Missing glucose or inferred gap readings"], "4")
+  expect_equal(glucose_display$Value[glucose_display$Label == "Uploaded blank glucose rows"], "1")
+  expect_equal(glucose_display$Value[glucose_display$Label == "Inferred timestamp-gap readings"], "3")
+})
+
+test_that("validation panel can display cached missingness review", {
+  standardized <- data.frame(
+    id = rep(c("A", "B"), each = 4),
+    timestamp = as.POSIXct("2026-05-05 08:00:00", tz = "UTC") + seq(0, by = 300, length.out = 8),
+    glucose = c(100, NA, 110, 115, 120, NA, NA, 125),
+    stringsAsFactors = FALSE
+  )
+  upload <- list(data = standardized[, c("timestamp", "glucose")], files = "sample.csv")
+  mapping <- list(timestamp = "timestamp", glucose = "glucose")
+  missingness <- imputation_missingness_summary(standardized, include_timestamp_gaps = FALSE)
+
+  html <- as.character(data_validation_panel_ui(
+    upload = upload,
+    mapping = mapping,
+    standardized_data = standardized,
+    missingness_review = missingness
+  ))
+
+  expect_true(grepl("Missingness review", html, fixed = TRUE))
+  expect_true(grepl("Missingness by Subject ID", html, fixed = TRUE))
+})
+
+test_that("validation panel renders full expected-reading summary labels", {
+  standardized <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 00:00:00",
+      "2026-05-05 00:05:00",
+      "2026-05-05 00:10:00",
+      "2026-05-05 00:30:00"
+    )),
+    glucose = c(100, NA, 120, 130),
+    stringsAsFactors = FALSE
+  )
+  upload <- list(data = standardized[, c("timestamp", "glucose")], files = "sample.csv")
+  mapping <- list(timestamp = "timestamp", glucose = "glucose")
+  missingness <- imputation_missingness_summary(standardized)
+
+  html <- paste(as.character(data_validation_panel_ui(
+    upload = upload,
+    mapping = mapping,
+    standardized_data = standardized,
+    missingness_review = missingness
+  )), collapse = "\n")
+
+  expect_true(grepl("Expected readings reviewed", html, fixed = TRUE))
+  expect_true(grepl("Missing glucose or inferred gap readings", html, fixed = TRUE))
+  expect_true(grepl("Uploaded blank glucose rows", html, fixed = TRUE))
+  expect_true(grepl("Inferred timestamp-gap readings", html, fixed = TRUE))
+})
+
 test_that("timestamp validation summary reports date-only parsed values", {
   upload <- list(
     data = data.frame(
@@ -213,7 +341,7 @@ test_that("data status summary counts inferred timestamp gaps as missing glucose
 })
 
 test_that("app UI includes dynamic version badge and theme CSS", {
-  description_path <- system.file("DESCRIPTION", package = "CGMAnalyzerShiny")
+  description_path <- system.file("DESCRIPTION", package = "CGManalyzer2")
   expected_version <- paste0(
     "v",
     as.character(read.dcf(description_path, fields = "Version")[[1L]])
@@ -226,10 +354,21 @@ test_that("app UI includes dynamic version badge and theme CSS", {
   expect_s3_class(ui, "shiny.tag.list")
   expect_equal(app_version_label(), expected_version)
   expect_true(grepl("cgm-brand-stack", brand_html, fixed = TRUE))
+  expect_true(grepl("CGManalyzer2", brand_html, fixed = TRUE))
   expect_true(grepl("cgm-version-label", brand_html, fixed = TRUE))
   expect_true(grepl(expected_version, brand_html, fixed = TRUE))
-  expect_true(grepl("CGMAnalyzerShiny theme polish", css_html, fixed = TRUE))
+  expect_true(grepl("CGManalyzer2 theme polish", css_html, fixed = TRUE))
   expect_true(file.exists(app_theme_css_path()))
+})
+
+test_that("package rename keeps repository URLs and avoids local paths in deployable files", {
+  settings <- create_reproducibility_settings()
+  description <- utils::packageDescription("CGManalyzer2")
+
+  expect_equal(settings$app, "CGManalyzer2")
+  expect_equal(description$Package, "CGManalyzer2")
+  expect_true(grepl("github.com/ZhangLabUKY/CGMAnalyzerShiny", description$URL, fixed = TRUE))
+  expect_true(grepl("github.com/ZhangLabUKY/CGMAnalyzerShiny/issues", description$BugReports, fixed = TRUE))
 })
 
 test_that("data workflow tabs render the expected stages", {

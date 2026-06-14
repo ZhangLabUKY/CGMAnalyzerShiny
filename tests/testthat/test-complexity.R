@@ -45,7 +45,7 @@ test_that("complexity metrics report ineligible short series", {
   expect_true(is.na(results$approximate_entropy))
 })
 
-test_that("complexity regularization does not bridge large gaps", {
+test_that("non-imputed complexity uses observed readings without regularization", {
   data <- data.frame(
     id = "A",
     timestamp = parse_cgm_timestamp(c(
@@ -58,12 +58,72 @@ test_that("complexity regularization does not bridge large gaps", {
     stringsAsFactors = FALSE
   )
 
+  local_mocked_bindings(
+    regularize_cgm_series = function(...) stop("Complexity should not regularize observed data.", call. = FALSE)
+  )
   results <- compute_complexity_metrics(data, min_points = 5, max_gap_intervals = 4)
 
-  expect_equal(results$regularized_points, 26)
+  expect_true(is.na(results$regularized_points))
   expect_equal(results$usable_points, 4)
   expect_false(results$eligible)
   expect_gte(results$gap_count, 1)
+  expect_equal(results$series_mode, "observed")
+  expect_true(grepl("observed finite glucose readings", results$series_note, fixed = TRUE))
+  expect_true(grepl("no interpolation or gap filling", results$notes, fixed = TRUE))
+})
+
+test_that("selected-subject complexity helpers use observed sequence without filling gaps", {
+  timestamp <- parse_cgm_timestamp("2026-05-05 00:00:00") +
+    c(seq(0, by = 300, length.out = 80), seq(300 * 120, by = 420, length.out = 80))
+  data <- data.frame(
+    id = "A",
+    timestamp = timestamp,
+    glucose = 115 + 20 * sin(seq_along(timestamp) / 6) + seq_along(timestamp) / 80,
+    stringsAsFactors = FALSE
+  )
+  params <- complexity_default_parameters(min_points = 50, mse_scale_max = 2)
+
+  local_mocked_bindings(
+    regularize_cgm_series = function(...) stop("Complexity should not regularize observed data.", call. = FALSE)
+  )
+  quick <- compute_complexity_quick_metrics(data, params)
+  hurst <- compute_complexity_hurst_metrics(data, params)
+  curves <- compute_complexity_dfa_higuchi_curves(data, params)
+  mse_curves <- compute_complexity_mse_curves(data, min_points = 50, mse_scale_max = 2)
+  display <- prepare_complexity_metrics_display(quick, data, show_subject_id = TRUE)
+
+  expect_equal(quick$series_mode, "observed")
+  expect_true(quick$eligible)
+  expect_true(is.finite(quick$shannon_entropy))
+  expect_true(any(grepl("observed finite glucose readings", display$Notes, fixed = TRUE)))
+  expect_s3_class(hurst, "data.frame")
+  expect_true("hurst_exponent" %in% names(hurst))
+  expect_s3_class(curves, "data.frame")
+  expect_s3_class(mse_curves, "data.frame")
+})
+
+test_that("imputed/generated complexity data is used directly without second regularization", {
+  timestamp <- parse_cgm_timestamp("2026-05-05 00:00:00") + seq(0, by = 300, length.out = 120)
+  data <- data.frame(
+    id = "A",
+    timestamp = timestamp,
+    glucose = 110 + 15 * sin(seq_along(timestamp) / 5),
+    imputed_flag = c(FALSE, rep(TRUE, length(timestamp) - 1L)),
+    inserted_timestamp_gap = c(FALSE, TRUE, rep(FALSE, length(timestamp) - 2L)),
+    stringsAsFactors = FALSE
+  )
+  params <- complexity_default_parameters(min_points = 80, mse_scale_max = 2)
+
+  local_mocked_bindings(
+    regularize_cgm_series = function(...) stop("Complexity should not re-regularize imputed data.", call. = FALSE)
+  )
+  quick <- compute_complexity_quick_metrics(data, params)
+  hurst <- compute_complexity_hurst_metrics(data, params)
+
+  expect_equal(quick$series_mode, "imputed_regular")
+  expect_equal(quick$regularized_points, quick$usable_points)
+  expect_true(grepl("imputed/generated analysis rows", quick$series_note, fixed = TRUE))
+  expect_s3_class(hurst, "data.frame")
 })
 
 test_that("pending complexity summary is lightweight and marks metrics pending", {
@@ -163,7 +223,20 @@ test_that("Hurst merge marks pending and failed values by stage status", {
   expect_true(all(grepl("Hurst exponent could not compute", failed$hurst_exponent_note, fixed = TRUE)))
 })
 
-test_that("CGManalyzer MSE wrapper restores working directory for short series", {
+test_that("Hurst merge handles malformed non-empty advanced rows", {
+  data <- complexity_example_data()
+  params <- complexity_default_parameters(min_points = 80)
+  quick <- compute_complexity_quick_metrics(data, params)
+  malformed <- data.frame(id = quick$id, other_value = seq_len(nrow(quick)))
+
+  merged <- merge_complexity_hurst_results(quick, malformed, status = "complete")
+
+  expect_equal(nrow(merged), nrow(quick))
+  expect_true(all(is.na(merged$hurst_exponent)))
+  expect_true(all(grepl("Hurst exponent could not compute", merged$hurst_exponent_note, fixed = TRUE)))
+})
+
+test_that("internal MSE wrapper restores working directory for short series", {
   old_wd <- getwd()
   result <- compute_cgmanalyzer_mse(seq_len(20), scale_max = 5)
 
@@ -174,9 +247,7 @@ test_that("CGManalyzer MSE wrapper restores working directory for short series",
   expect_equal(nrow(result$scales), 0)
 })
 
-test_that("CGManalyzer MSE wrapper restores working directory after live call", {
-  skip_if_not_installed("CGManalyzer")
-  skip_if(!"MSEbyC.fn" %in% getNamespaceExports("CGManalyzer"))
+test_that("internal MSE wrapper restores working directory after full call", {
   old_wd <- getwd()
   result <- compute_cgmanalyzer_mse(sin(seq_len(120) / 4) + seq_len(120) / 50, scale_max = 5)
 
@@ -186,7 +257,7 @@ test_that("CGManalyzer MSE wrapper restores working directory after live call", 
   expect_s3_class(result$scales, "data.frame")
   if (nrow(result$scales)) {
     expect_true(all(c("Scale", "SampleEntropy") %in% names(result$scales)))
-    expect_true(is.na(result$value))
+    expect_true(is.finite(result$value))
     expect_true(any(is.finite(result$scales$SampleEntropy)))
   }
 })
@@ -205,6 +276,86 @@ test_that("advanced complexity helpers handle sufficient and constant series", {
   expect_true(nrow(higuchi$curve) > 0)
   expect_true(is.na(safe_dfa_alpha(constant)))
   expect_true(is.na(safe_higuchi_fd(constant, kmax = 8)))
+})
+
+test_that("complexity subject splitting preserves sorted subjects and metadata", {
+  data <- data.frame(
+    id = c("B", "A", "B", "A", NA, ""),
+    timestamp = parse_cgm_timestamp(rep("2026-05-05 08:00:00", 6)),
+    glucose = seq_len(6),
+    group = c("T", "C", "T", "C", "X", "X"),
+    stringsAsFactors = FALSE
+  )
+
+  split <- split_complexity_subjects(data)
+
+  expect_equal(names(split), c("A", "B"))
+  expect_equal(vapply(split, nrow, integer(1)), c(A = 2L, B = 2L))
+  expect_equal(unique(split$A$group), "C")
+  expect_equal(unique(split$B$group), "T")
+})
+
+reference_dfa_details <- function(x) {
+  x <- x[is.finite(x)]
+  n <- length(x)
+  if (n < 32L || length(unique(x)) <= 1L) {
+    return(list(value = NA_real_, curve = data.frame(scale_value = numeric(), metric_value = numeric())))
+  }
+  y <- cumsum(x - mean(x))
+  windows <- unique(floor(exp(seq(log(8), log(floor(n / 4)), length.out = 8))))
+  windows <- windows[windows >= 8L & windows < n / 2]
+  fluctuation <- vapply(windows, function(window) {
+    segments <- floor(n / window)
+    rms <- vapply(seq_len(segments), function(segment) {
+      idx <- ((segment - 1L) * window + 1L):(segment * window)
+      rms_detrended_linear(y[idx])
+    }, numeric(1))
+    sqrt(mean(rms^2, na.rm = TRUE))
+  }, numeric(1))
+  keep <- is.finite(fluctuation) & fluctuation > 0 & windows > 0
+  list(
+    value = if (sum(keep) >= 2L) simple_ols_slope(log(windows[keep]), log(fluctuation[keep])) else NA_real_,
+    curve = data.frame(scale_value = as.numeric(windows[keep]), metric_value = as.numeric(fluctuation[keep]))
+  )
+}
+
+reference_higuchi_details <- function(x, kmax = 8) {
+  x <- x[is.finite(x)]
+  n <- length(x)
+  if (n < (kmax * 2L) || length(unique(x)) <= 1L) {
+    return(list(value = NA_real_, curve = data.frame(scale_value = numeric(), metric_value = numeric())))
+  }
+  k_values <- seq_len(kmax)
+  lengths <- vapply(k_values, function(k) {
+    lm_values <- vapply(seq_len(k), function(m) {
+      idx <- seq(m, n, by = k)
+      curve_length <- sum(abs(diff(x[idx])))
+      curve_length * (n - 1L) / ((length(idx) - 1L) * k)
+    }, numeric(1))
+    mean(lm_values, na.rm = TRUE)
+  }, numeric(1))
+  keep <- is.finite(lengths) & lengths > 0
+  list(
+    value = if (sum(keep) >= 2L) simple_ols_slope(log(1 / k_values[keep]), log(lengths[keep])) else NA_real_,
+    curve = data.frame(scale_value = as.numeric(k_values[keep]), metric_value = as.numeric(lengths[keep]))
+  )
+}
+
+test_that("Rcpp DFA and Higuchi kernels match reference R calculations", {
+  x <- sin(seq_len(180) / 5) + seq_len(180) / 100
+  constant <- rep(100, 180)
+
+  dfa <- compute_dfa_details(x)
+  dfa_ref <- reference_dfa_details(x)
+  higuchi <- compute_higuchi_details(x, kmax = 8)
+  higuchi_ref <- reference_higuchi_details(x, kmax = 8)
+
+  expect_equal(dfa$value, dfa_ref$value, tolerance = 1e-8)
+  expect_equal(dfa$curve, dfa_ref$curve, tolerance = 1e-8)
+  expect_equal(higuchi$value, higuchi_ref$value, tolerance = 1e-8)
+  expect_equal(higuchi$curve, higuchi_ref$curve, tolerance = 1e-8)
+  expect_true(is.na(compute_dfa_details(constant)$value))
+  expect_true(is.na(compute_higuchi_details(constant, kmax = 8)$value))
 })
 
 test_that("complexity display helpers use user-facing labels", {
@@ -428,8 +579,6 @@ test_that("complexity summary plots support all and single metric views", {
 })
 
 test_that("complexity MSE curve helpers prepare and plot scale-level data", {
-  skip_if_not_installed("CGManalyzer")
-  skip_if(!"MSEbyC.fn" %in% getNamespaceExports("CGManalyzer"))
   data <- complexity_example_data()
   curves <- compute_complexity_mse_curves(data, min_points = 80, mse_scale_max = 5)
   plot_data <- prepare_mse_curve_plot_data(curves, data)
@@ -464,6 +613,187 @@ test_that("complexity bundle returns scalar metrics and scale curves together", 
   expect_true(all(c("sample_entropy", "approximate_entropy", "multiscale_sample_entropy") %in% names(bundle$metrics)))
   expect_true(all(is.na(bundle$metrics$sample_entropy)))
   expect_true(all(is.na(bundle$metrics$approximate_entropy)))
+})
+
+test_that("complexity row binding tolerates empty and uneven advanced results", {
+  dfa <- empty_complexity_curve_rows()
+  mse <- data.frame(
+    id = "A",
+    curve_metric = "mse",
+    scale_variable = "Scale",
+    scale_value = 1,
+    metric_value = 0.5,
+    value_label = "Sample entropy",
+    note = "",
+    mse_only_status = "ok",
+    stringsAsFactors = FALSE
+  )
+
+  bound <- bind_complexity_rows(list(dfa, mse), empty = empty_complexity_curve_rows())
+  empty_bound <- bind_complexity_rows(list(dfa), empty = empty_complexity_curve_rows())
+
+  expect_equal(nrow(bound), 1L)
+  expect_true("mse_only_status" %in% names(bound))
+  expect_equal(empty_bound, empty_complexity_curve_rows())
+})
+
+test_that("advanced complexity batch returns finite observed scale curves", {
+  timestamp <- parse_cgm_timestamp("2026-05-05 00:00:00") + seq(0, by = 300, length.out = 240)
+  data <- data.frame(
+    id = "A",
+    timestamp = timestamp,
+    glucose = 120 + 25 * sin(seq_along(timestamp) / 7) + seq_along(timestamp) / 50,
+    stringsAsFactors = FALSE
+  )
+  params <- complexity_default_parameters(min_points = 100, mse_scale_max = 5, higuchi_kmax = 8)
+
+  value <- complexity_compute_advanced_batch(data, "A", params)
+  curves <- bind_complexity_rows(
+    list(
+      complexity_stage_data(value$dfa_higuchi_curves, empty_complexity_curve_rows()),
+      complexity_stage_data(value$mse_curves, empty_complexity_curve_rows())
+    ),
+    empty = empty_complexity_curve_rows()
+  )
+
+  expect_equal(complexity_stage_status_value(value$hurst), "complete")
+  expect_equal(complexity_stage_status_value(value$dfa_higuchi_curves), "complete")
+  expect_equal(complexity_stage_status_value(value$mse_curves), "complete")
+  expect_true(nrow(curves) > 0)
+  expect_true(any(curves$curve_metric %in% c("dfa", "higuchi")))
+  expect_true(any(curves$curve_metric == "mse"))
+})
+
+test_that("empty advanced curves can complete without failure statuses", {
+  timestamp <- parse_cgm_timestamp("2026-05-05 00:00:00") + seq(0, by = 300, length.out = 120)
+  data <- data.frame(
+    id = "A",
+    timestamp = timestamp,
+    glucose = rep(120, length(timestamp)),
+    stringsAsFactors = FALSE
+  )
+  params <- complexity_default_parameters(min_points = 100, mse_scale_max = 5, higuchi_kmax = 8)
+  quick <- compute_complexity_quick_metrics(data, params)
+  entry <- list(metrics = quick, curves = empty_complexity_curve_rows())
+
+  value <- complexity_compute_advanced_batch(data, "A", params)
+  update_values <- complexity_advanced_entry_values(entry, value, "A")
+
+  expect_equal(update_values$curve_status, "complete")
+  expect_equal(update_values$mse_status, "complete")
+  expect_equal(nrow(update_values$curves), 0L)
+  expect_null(update_values$error)
+})
+
+test_that("native curve errors mark only affected advanced stages failed", {
+  timestamp <- parse_cgm_timestamp("2026-05-05 00:00:00") + seq(0, by = 300, length.out = 180)
+  data <- data.frame(
+    id = "A",
+    timestamp = timestamp,
+    glucose = 120 + 20 * sin(seq_along(timestamp) / 6),
+    stringsAsFactors = FALSE
+  )
+  params <- complexity_default_parameters(min_points = 100, mse_scale_max = 3, higuchi_kmax = 8)
+
+  local_mocked_bindings(
+    dfa_details_cpp = function(x) stop("native dfa failed", call. = FALSE)
+  )
+  value <- complexity_compute_advanced_batch(data, "A", params)
+
+  expect_equal(complexity_stage_status_value(value$hurst), "complete")
+  expect_equal(complexity_stage_status_value(value$dfa_higuchi_curves), "failed")
+  expect_equal(complexity_stage_status_value(value$mse_curves), "complete")
+  expect_true(grepl("native dfa failed", complexity_stage_error_value(value$dfa_higuchi_curves), fixed = TRUE))
+})
+
+test_that("native MSE errors mark MSE failed without failing curve stage", {
+  timestamp <- parse_cgm_timestamp("2026-05-05 00:00:00") + seq(0, by = 300, length.out = 180)
+  data <- data.frame(
+    id = "A",
+    timestamp = timestamp,
+    glucose = 120 + 20 * sin(seq_along(timestamp) / 6),
+    stringsAsFactors = FALSE
+  )
+  params <- complexity_default_parameters(min_points = 100, mse_scale_max = 3, higuchi_kmax = 8)
+
+  local_mocked_bindings(
+    mse_scales_cpp = function(...) stop("native mse failed", call. = FALSE)
+  )
+  value <- complexity_compute_advanced_batch(data, "A", params)
+
+  expect_equal(complexity_stage_status_value(value$dfa_higuchi_curves), "complete")
+  expect_equal(complexity_stage_status_value(value$mse_curves), "failed")
+  expect_true(grepl("native mse failed", complexity_stage_error_value(value$mse_curves), fixed = TRUE))
+})
+
+test_that("native symbol bootstrap supports sourced app Rcpp wrappers", {
+  env <- new.env(parent = globalenv())
+  eval(parse(text = "
+    dfa_details_cpp <- function(x) .Call(`_CGManalyzer2_dfa_details_cpp`, x)
+    higuchi_details_cpp <- function(x, kmax) .Call(`_CGManalyzer2_higuchi_details_cpp`, x, kmax)
+    mse_scales_cpp <- function(values, max_scale, m, r, min_points) .Call(`_CGManalyzer2_mse_scales_cpp`, values, max_scale, m, r, min_points)
+  "), envir = env)
+
+  expect_false(exists("_CGManalyzer2_dfa_details_cpp", envir = env, inherits = FALSE))
+  skip_if_not(cgm_bootstrap_native_symbols(env = env, quiet = TRUE), "CGManalyzer2 native DLL is not available")
+  expect_true(exists("_CGManalyzer2_dfa_details_cpp", envir = env, inherits = FALSE))
+  expect_true(exists("_CGManalyzer2_higuchi_details_cpp", envir = env, inherits = FALSE))
+  expect_true(exists("_CGManalyzer2_mse_scales_cpp", envir = env, inherits = FALSE))
+
+  x <- sin(seq_len(180) / 5) + seq_len(180) / 100
+  expect_gt(length(env$dfa_details_cpp(x)$scale_value), 0L)
+  expect_gt(length(env$higuchi_details_cpp(x, 8L)$scale_value), 0L)
+  expect_gt(length(env$mse_scales_cpp(x, 5L, 2L, 0.15, 1000L)$Scale), 0L)
+})
+
+test_that("advanced results merge into selected-subject cache without recomputing quick rows", {
+  data <- complexity_example_data()
+  params <- complexity_default_parameters(min_points = 80, mse_scale_max = 2)
+  id <- subject_id_values(data)[[1L]]
+  subject_data <- data[as.character(data$id) == id, , drop = FALSE]
+  quick <- compute_complexity_quick_metrics(subject_data, params)
+  store <- complexity_make_store("key", subject_id_values(data), selected = id)
+
+  complexity_update_entry(store, id, list(
+    metrics = quick,
+    curves = empty_complexity_curve_rows(),
+    quick_status = "complete",
+    hurst_status = "running",
+    curve_status = "running",
+    mse_status = "running"
+  ))
+  value <- complexity_compute_advanced_batch(subject_data, id, params)
+  update_values <- complexity_advanced_entry_values(complexity_store_get(store, id), value, id)
+  updated <- complexity_update_entry(store, id, update_values)
+
+  expect_equal(updated$quick_status, "complete")
+  expect_equal(updated$hurst_status, "complete")
+  expect_equal(updated$curve_status, "complete")
+  expect_equal(updated$mse_status, "complete")
+  expect_true(nrow(updated$metrics) > 0)
+  expect_true(nrow(updated$curves) > 0)
+  expect_equal(complexity_store_cached_ids(store), id)
+})
+
+test_that("complexity curve display handles filtered-empty grouped rows", {
+  data <- complexity_grouped_example_data()
+  curves <- data.frame(
+    id = subject_id_values(data)[[1L]],
+    curve_metric = "dfa",
+    scale_variable = "Window size",
+    scale_value = NA_real_,
+    metric_value = NA_real_,
+    value_label = "Fluctuation",
+    derived_scalar_label = "DFA alpha",
+    derived_scalar_value = NA_real_,
+    note = "",
+    stringsAsFactors = FALSE
+  )
+
+  plot_data <- prepare_complexity_curve_plot_data(curves, data, curve_metric = "dfa")
+
+  expect_equal(nrow(plot_data), 0L)
+  expect_true(all(c("Subject ID", "Group", "Curve metric", "Scale value", "Metric value", "Tooltip") %in% names(plot_data)))
 })
 
 test_that("DFA/Higuchi curve helper returns only curve rows with derived scalar annotations", {
@@ -504,11 +834,12 @@ test_that("complexity MSE results merge into fast results by status", {
   expect_true(all(is.na(failed$multiscale_sample_entropy)))
   expect_true(all(grepl("could not compute", failed$multiscale_sample_entropy_note, fixed = TRUE)))
   expect_true(grepl("MSE running", complexity_mse_status_text("running"), fixed = TRUE))
-  expect_true(grepl("MSE available", complexity_mse_status_text("complete"), fixed = TRUE))
+  expect_true(grepl("MSE finished", complexity_mse_status_text("complete"), fixed = TRUE))
   expect_true(grepl("Complexity summary running", complexity_status_text("running"), fixed = TRUE))
   expect_true(grepl("Complexity summary available", complexity_status_text("complete"), fixed = TRUE))
   expect_true(grepl("Hurst exponent is calculating", complexity_scalar_status_text("running"), fixed = TRUE))
   expect_true(grepl("DFA/Higuchi curves running", complexity_curve_status_text("running"), fixed = TRUE))
+  expect_true(grepl("DFA/Higuchi curves finished", complexity_curve_status_text("complete"), fixed = TRUE))
   expect_true(grepl("could not compute", complexity_status_text("failed"), fixed = TRUE))
   expect_true(grepl("could not compute", complexity_scalar_status_text("failed"), fixed = TRUE))
   expect_true(grepl("could not compute", complexity_curve_status_text("failed"), fixed = TRUE))
@@ -520,8 +851,6 @@ test_that("complexity MSE results merge into fast results by status", {
 })
 
 test_that("complexity MSE curve plot data includes Group in tooltips when available", {
-  skip_if_not_installed("CGManalyzer")
-  skip_if(!"MSEbyC.fn" %in% getNamespaceExports("CGManalyzer"))
   data <- complexity_grouped_example_data()
   curves <- compute_complexity_mse_curves(data, min_points = 80, mse_scale_max = 5)
   plot_data <- prepare_mse_curve_plot_data(curves, data)
@@ -661,6 +990,211 @@ test_that("complexity status chips render stage states", {
   expect_true(grepl("Summary", html, fixed = TRUE))
   expect_true(grepl("Hurst", html, fixed = TRUE))
   expect_true(grepl("DFA/Higuchi", html, fixed = TRUE))
+})
+
+test_that("complexity store aggregates only selected-on-demand cached subjects", {
+  data <- complexity_example_data()
+  params <- complexity_default_parameters(min_points = 80)
+  id <- subject_id_values(data)[[1L]]
+  quick <- compute_complexity_quick_metrics(data[as.character(data$id) == id, , drop = FALSE], params)
+  store <- complexity_make_store("key", subject_id_values(data), selected = id)
+
+  expect_equal(complexity_store_cached_ids(store), character())
+  expect_true(grepl("0 of 5", complexity_progress_text(store), fixed = TRUE))
+  expect_equal(complexity_stage_status(store, all_filter_value(), "quick_status"), "idle")
+
+  complexity_update_entry(store, id, list(
+    metrics = quick,
+    curves = empty_complexity_curve_rows(),
+    quick_status = "complete",
+    hurst_status = "running",
+    curve_status = "running",
+    mse_status = "running"
+  ))
+
+  expect_equal(complexity_store_cached_ids(store), id)
+  expect_equal(nrow(complexity_aggregate_metrics(store)), 1L)
+  expect_equal(complexity_stage_status(store, all_filter_value(), "quick_status"), "complete")
+  expect_equal(complexity_stage_status(store, all_filter_value(), "hurst_status"), "running")
+})
+
+test_that("complexity entry updates replace nested data frames without row recycling", {
+  store <- complexity_make_store("key", ids = "A", selected = "A")
+  completed <- data.frame(
+    id = rep("A", 3),
+    readings = rep(120L, 3),
+    finite_glucose_rows = rep(120L, 3),
+    first_timestamp = parse_cgm_timestamp(rep("2026-05-05 00:00:00", 3)),
+    last_timestamp = parse_cgm_timestamp(rep("2026-05-05 09:55:00", 3)),
+    regularized_points = rep(NA_integer_, 3),
+    usable_points = rep(120L, 3),
+    interval_minutes = rep(5, 3),
+    gap_count = rep(0L, 3),
+    eligible = rep(TRUE, 3),
+    notes = rep("Eligible.", 3),
+    series_mode = rep("observed", 3),
+    series_note = rep(complexity_series_note("observed"), 3),
+    shannon_entropy = c(0.8, 0.8, 0.8),
+    sample_entropy = rep(NA_real_, 3),
+    approximate_entropy = rep(NA_real_, 3),
+    multiscale_sample_entropy = rep(NA_real_, 3),
+    hurst_exponent = c(NA_real_, 0.6, 0.7),
+    dfa_alpha = rep(NA_real_, 3),
+    higuchi_fractal_dimension = rep(NA_real_, 3),
+    shannon_entropy_note = rep("", 3),
+    sample_entropy_note = rep("", 3),
+    approximate_entropy_note = rep("", 3),
+    multiscale_sample_entropy_note = rep("", 3),
+    hurst_exponent_note = rep("", 3),
+    dfa_alpha_note = rep("", 3),
+    higuchi_fractal_dimension_note = rep("", 3),
+    stringsAsFactors = FALSE
+  )
+
+  complexity_update_entry(store, "A", list(metrics = complexity_result_columns(), quick_status = "running"))
+  updated <- complexity_update_entry(store, "A", list(metrics = completed, quick_status = "complete"))
+
+  expect_equal(nrow(updated$metrics), 3L)
+  expect_equal(complexity_store_get(store, "A")$quick_status, "complete")
+})
+
+test_that("complexity version bumper can run outside reactive consumers", {
+  version <- shiny::reactiveVal(0L)
+  bump <- complexity_make_version_bumper(version)
+
+  expect_no_error(bump())
+  expect_no_error(bump())
+  expect_equal(shiny::isolate(version()), 2L)
+  expect_equal(complexity_subject_key(factor("11")), "11")
+  expect_equal(complexity_subject_key(11), "11")
+  expect_equal(complexity_subject_key(all_filter_value()), "")
+  expect_equal(complexity_subject_keys(factor(c("11", "12"))), c("11", "12"))
+  expect_true(complexity_should_update_display_for(all_filter_value(), "A"))
+  expect_true(complexity_should_update_display_for("A", c("A", "B")))
+  expect_false(complexity_should_update_display_for("B", "A"))
+})
+
+test_that("advanced update helper uses captured subject values without reactive reads", {
+  data <- complexity_example_data()
+  params <- complexity_default_parameters(min_points = 80, mse_scale_max = 2)
+  id <- subject_id_values(data)[[1L]]
+  subject_data <- data[as.character(data$id) == id, , drop = FALSE]
+  quick <- compute_complexity_quick_metrics(subject_data, params)
+  store <- complexity_make_store("key", id, selected = id)
+  store$advanced_running <- id
+  progress <- 0L
+  display <- 0L
+  bump_progress <- function() progress <<- progress + 1L
+  bump_display <- function() display <<- display + 1L
+  value <- list(
+    hurst = list(
+      data = data.frame(id = id, hurst_exponent = 0.6, hurst_exponent_note = "", stringsAsFactors = FALSE),
+      status = "complete",
+      error = ""
+    ),
+    dfa_higuchi_curves = list(data = empty_complexity_curve_rows(), status = "complete", error = ""),
+    mse_curves = list(data = empty_complexity_curve_rows(), status = "complete", error = "")
+  )
+  complexity_update_entry(store, id, list(
+    metrics = quick,
+    curves = empty_complexity_curve_rows(),
+    quick_status = "complete",
+    hurst_status = "running",
+    curve_status = "running",
+    mse_status = "running"
+  ))
+
+  updated <- complexity_apply_advanced_update(
+    store,
+    factor(id),
+    "key",
+    value,
+    display_subject = factor(id),
+    bump_progress = bump_progress,
+    bump_display = bump_display
+  )
+
+  entry <- complexity_store_get(store, id)
+  expect_true(updated)
+  expect_equal(progress, 1L)
+  expect_equal(display, 1L)
+  expect_equal(store$advanced_running, character())
+  expect_equal(entry$hurst_status, "complete")
+  expect_equal(entry$curve_status, "complete")
+  expect_equal(entry$mse_status, "complete")
+  expect_equal(entry$metrics$hurst_exponent, 0.6)
+})
+
+test_that("advanced failure helper clears running and avoids unrelated display bumps", {
+  data <- complexity_example_data()
+  params <- complexity_default_parameters(min_points = 80, mse_scale_max = 2)
+  id <- subject_id_values(data)[[1L]]
+  subject_data <- data[as.character(data$id) == id, , drop = FALSE]
+  quick <- compute_complexity_quick_metrics(subject_data, params)
+  store <- complexity_make_store("key", id, selected = id)
+  store$advanced_running <- id
+  progress <- 0L
+  display <- 0L
+  complexity_update_entry(store, id, list(metrics = quick, quick_status = "complete"))
+
+  updated <- complexity_mark_advanced_failed(
+    store,
+    subject_data,
+    params,
+    factor(id),
+    "key",
+    simpleError("advanced failed"),
+    display_subject = "other",
+    bump_progress = function() progress <<- progress + 1L,
+    bump_display = function() display <<- display + 1L
+  )
+
+  entry <- complexity_store_get(store, id)
+  expect_true(updated)
+  expect_equal(progress, 1L)
+  expect_equal(display, 0L)
+  expect_equal(store$advanced_running, character())
+  expect_equal(entry$hurst_status, "failed")
+  expect_equal(entry$curve_status, "failed")
+  expect_equal(entry$mse_status, "failed")
+  expect_true(grepl("advanced failed", entry$error, fixed = TRUE))
+})
+
+test_that("advanced update helpers ignore stale keys and closed sessions", {
+  id <- "A"
+  store <- complexity_make_store("key", id, selected = id)
+  store$advanced_running <- id
+  progress <- 0L
+  value <- list(
+    hurst = list(data = empty_complexity_hurst_rows(), status = "complete", error = ""),
+    dfa_higuchi_curves = list(data = empty_complexity_curve_rows(), status = "complete", error = ""),
+    mse_curves = list(data = empty_complexity_curve_rows(), status = "complete", error = "")
+  )
+
+  stale <- complexity_apply_advanced_update(
+    store,
+    id,
+    "old-key",
+    value,
+    display_subject = id,
+    bump_progress = function() progress <<- progress + 1L
+  )
+  closed <- complexity_mark_advanced_failed(
+    store,
+    data.frame(id = id, timestamp = as.POSIXct(NA), glucose = NA_real_),
+    complexity_default_parameters(),
+    id,
+    "key",
+    simpleError("closed"),
+    display_subject = id,
+    bump_progress = function() progress <<- progress + 1L,
+    session_closed = function() TRUE
+  )
+
+  expect_false(stale)
+  expect_false(closed)
+  expect_equal(progress, 0L)
+  expect_equal(store$advanced_running, id)
 })
 
 test_that("complexity summary cards report eligibility and parameters", {

@@ -254,7 +254,7 @@ run_cgmissingdata_imputation <- function(
   result <- cgm_timed(
     "analysis_data_imputation_external_call",
     withCallingHandlers(
-      call_cgmissingdata_imputation(fun, call_args),
+      cgm_suppress_non_cgma_messages(call_cgmissingdata_imputation(fun, call_args)),
       warning = function(warning) {
         warning_messages <<- c(warning_messages, conditionMessage(warning))
         invokeRestart("muffleWarning")

@@ -1,5 +1,57 @@
 options(shiny.maxRequestSize = 1024^3)
 
+analysis_missingness_review_cache_key <- function(data, date_range, interval_minutes) {
+  cgm_cache_key(
+    cgm_data_signature(data),
+    analysis_date_range_signature(list(analysis_date_range = date_range)),
+    list(interval_minutes = interval_minutes)
+  )
+}
+
+compute_analysis_missingness_review <- function(data, interval_minutes) {
+  grid <- cgm_timed(
+    "data_missingness_review_fast",
+    cgm_suppress_non_cgma_messages(
+      fast_missingness_grid_summary_by_id(
+        data,
+        interval_minutes = interval_minutes
+      )
+    )
+  )
+  cgm_timed(
+    "data_imputation_candidate_summary_fast",
+    cgm_suppress_non_cgma_messages(
+      imputation_missingness_summary(
+        data,
+        interval_minutes = interval_minutes,
+        precomputed = grid,
+        include_timestamp_gaps = TRUE
+      )
+    )
+  )
+}
+
+shared_missingness_review_cached <- function(cache_env, key, compute) {
+  if (
+    is.environment(cache_env) &&
+      identical(cache_env$analysis_missingness_review_key %||% NULL, key) &&
+      !is.null(cache_env$analysis_missingness_review_value)
+  ) {
+    cgm_log_performance(
+      "data_missingness_review_cache_hit",
+      elapsed_ms = 0,
+      rows = nrow(cache_env$analysis_missingness_review_value)
+    )
+    return(cache_env$analysis_missingness_review_value)
+  }
+  value <- compute()
+  if (is.environment(cache_env)) {
+    cache_env$analysis_missingness_review_key <- key
+    cache_env$analysis_missingness_review_value <- value
+  }
+  value
+}
+
 app_server <- function(input, output, session) {
   session$onSessionEnded(function() {
     cleanup_background_workers()
@@ -125,11 +177,22 @@ app_server <- function(input, output, session) {
       error = function(error) NULL
     )
     standardized_result <- safe_standardized()
+    missingness_review <- tryCatch(
+      if (is.function(shared_missingness$analysis_missingness_review)) {
+        shared_missingness$analysis_missingness_review()
+      } else {
+        NULL
+      },
+      shiny.silent.error = function(error) NULL,
+      error = function(error) NULL
+    )
     data_validation_panel_ui(
       upload = upload,
       mapping = map,
+      standardized_data = standardized_result$data,
       standardization_error = standardized_result$error,
-      settings = safe_settings()
+      settings = safe_settings(),
+      missingness_review = missingness_review
     )
   })
 
@@ -258,40 +321,26 @@ app_server <- function(input, output, session) {
   cache = "session"
   )
 
-  shared_missingness$analysis_missingness_review <- shiny::bindCache(shiny::reactive({
+  shared_missingness$analysis_missingness_review <- shiny::reactive({
     data <- analysis_input()
     interval_minutes <- settings()$imputation_interval_minutes %||% 5L
-    shiny::withProgress(
-      message = "Reviewing timestamp gaps...",
-      value = 0.4,
-      {
-        grid <- cgm_timed(
-          "data_missingness_review_fast",
-          cgm_suppress_non_cgma_messages(
-            fast_missingness_grid_summary_by_id(
-              data,
-              interval_minutes = interval_minutes
-            )
-          )
-        )
-        cgm_timed(
-          "data_imputation_candidate_summary_fast",
-          cgm_suppress_non_cgma_messages(
-            imputation_missingness_summary(
-              data,
-              interval_minutes = interval_minutes,
-              precomputed = grid,
-              include_timestamp_gaps = TRUE
-            )
-          )
+    review_key <- analysis_missingness_review_cache_key(
+      data,
+      settings()$analysis_date_range,
+      interval_minutes
+    )
+    shared_missingness_review_cached(
+      shared_missingness,
+      review_key,
+      function() {
+        shiny::withProgress(
+          message = "Reviewing timestamp gaps...",
+          value = 0.4,
+          compute_analysis_missingness_review(data, interval_minutes)
         )
       }
     )
-  }),
-  cgm_data_signature(analysis_input()),
-  settings()$imputation_interval_minutes,
-  cache = "session"
-  )
+  })
 
   imputation_cache <- shiny::reactiveVal(NULL)
   imputation_request_signature <- function(data, current_settings) {

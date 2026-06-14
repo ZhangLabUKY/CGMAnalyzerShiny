@@ -60,8 +60,37 @@ threshold_signature <- function(thresholds) {
   unlist(thresholds[c("tbr_level2", "tir_lower", "tir_upper", "tar_level2")], use.names = TRUE)
 }
 
+cgm_cache_key <- function(...) {
+  values <- unlist(list(...), recursive = TRUE, use.names = TRUE)
+  if (!length(values)) {
+    return("")
+  }
+  values <- values[order(names(values))]
+  paste(
+    sprintf("%s=%s", names(values), vapply(values, function(value) {
+      if (length(value) == 0L || is.null(value)) {
+        return("")
+      }
+      if (is.na(value)) {
+        return("NA")
+      }
+      as.character(value)
+    }, character(1))),
+    collapse = "|"
+  )
+}
+
 cgm_performance_log_enabled <- function() {
   isTRUE(getOption("CGMA.performance_log", FALSE))
+}
+
+cgm_performance_run_id <- function() {
+  run_id <- getOption("CGMA.performance_run_id", NULL)
+  if (is.null(run_id) || !nzchar(as.character(run_id[[1L]]))) {
+    run_id <- format(Sys.time(), "%Y%m%d-%H%M%S")
+    options(CGMA.performance_run_id = run_id)
+  }
+  as.character(run_id[[1L]])
 }
 
 cgm_performance_log_file <- function() {
@@ -73,7 +102,7 @@ cgm_performance_log_file <- function() {
     file.path(
       "dev_notes",
       "logs",
-      paste0("performance-", format(Sys.Date(), "%Y%m%d"), ".csv")
+      paste0("performance-", cgm_performance_run_id(), ".csv")
     )
   } else {
     as.character(file[[1L]])
@@ -105,7 +134,15 @@ cgm_performance_context_text <- function(context = NULL) {
   )
 }
 
-cgm_log_performance <- function(label, elapsed_ms, rows = NA_integer_, status = "ok", context = NULL) {
+cgm_log_performance <- function(
+  label,
+  elapsed_ms,
+  rows = NA_integer_,
+  status = "ok",
+  context = NULL,
+  start_time = NULL,
+  end_time = NULL
+) {
   if (!cgm_performance_log_enabled()) {
     return(invisible(NULL))
   }
@@ -113,15 +150,27 @@ cgm_log_performance <- function(label, elapsed_ms, rows = NA_integer_, status = 
   row_text <- if (is.na(rows)) "" else paste0(" rows=", rows)
   context_text <- cgm_performance_context_text(context)
   context_message <- if (nzchar(context_text)) paste0(" ", context_text) else ""
-  message(sprintf("[CGMA perf] %s %.1f ms status=%s%s%s", label, elapsed_ms, status, row_text, context_message))
+  elapsed_seconds <- elapsed_ms / 1000
+  duration_text <- if (elapsed_ms >= 1000) {
+    sprintf("%.1f ms (%.3f s)", elapsed_ms, elapsed_seconds)
+  } else {
+    sprintf("%.1f ms", elapsed_ms)
+  }
+  message(sprintf("[CGMA perf] %s %s status=%s%s%s", label, duration_text, status, row_text, context_message))
 
   file <- cgm_performance_log_file()
   if (nzchar(file)) {
+    end_time <- end_time %||% Sys.time()
+    start_time <- start_time %||% (end_time - elapsed_seconds)
     dir.create(dirname(file), recursive = TRUE, showWarnings = FALSE)
     row <- data.frame(
-      timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+      run_id = cgm_performance_run_id(),
+      start_time = format(start_time, "%Y-%m-%d %H:%M:%S"),
+      end_time = format(end_time, "%Y-%m-%d %H:%M:%S"),
+      timestamp = format(end_time, "%Y-%m-%d %H:%M:%S"),
       label = label,
       elapsed_ms = round(elapsed_ms, 3),
+      elapsed_seconds = round(elapsed_seconds, 6),
       rows = if (is.na(rows)) NA_integer_ else as.integer(rows),
       status = status,
       context = context_text,
@@ -144,6 +193,7 @@ cgm_timed <- function(label, expr, rows = NULL, context = NULL) {
   if (!cgm_performance_log_enabled()) {
     return(force(expr))
   }
+  start_time <- Sys.time()
   start <- proc.time()[["elapsed"]]
   status <- "ok"
   error <- NULL
@@ -155,6 +205,7 @@ cgm_timed <- function(label, expr, rows = NULL, context = NULL) {
       NULL
     }
   )
+  end_time <- Sys.time()
   elapsed_ms <- 1000 * (proc.time()[["elapsed"]] - start)
   resolved_rows <- rows
   if (is.null(resolved_rows)) {
@@ -169,7 +220,9 @@ cgm_timed <- function(label, expr, rows = NULL, context = NULL) {
     elapsed_ms = elapsed_ms,
     rows = resolved_rows %||% NA_integer_,
     status = status,
-    context = log_context
+    context = log_context,
+    start_time = start_time,
+    end_time = end_time
   )
   if (!is.null(error)) {
     stop(error)

@@ -8,9 +8,9 @@ coverage](https://codecov.io/gh/ZhangLabUKY/CGMAnalyzerShiny/graph/badge.svg)](h
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# CGMAnalyzerShiny
+# CGManalyzer2
 
-`CGMAnalyzerShiny` is an interactive Shiny application for continuous
+`CGManalyzer2` is an interactive Shiny application for continuous
 glucose monitoring (CGM) analysis. It is designed for research and
 applied analytic workflows where users need to upload CGM files, check
 data quality, review missingness, calculate clinically relevant glucose
@@ -25,7 +25,7 @@ statistical testing, and export tabs in one place.
 
 ## What the app does
 
-`CGMAnalyzerShiny` helps turn raw or semi-structured CGM data into
+`CGManalyzer2` helps turn raw or semi-structured CGM data into
 analysis-ready outputs. The app can:
 
 - Upload CSV, TXT, XLS, and XLSX CGM files, including
@@ -83,11 +83,11 @@ From the project directory, open R or RStudio and run:
 source("app.R")
 ```
 
-If the package has already been loaded or installed, the app can also be
-started with:
+If the package source has already been loaded in the current R session,
+the app can also be started with:
 
 ``` r
-CGMAnalyzerShiny::run_app()
+run_app()
 ```
 
 ## Data and outputs

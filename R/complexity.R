@@ -52,7 +52,7 @@ complexity_default_parameters <- function(
 complexity_parameter_label <- function(parameters) {
   paste0(
     "min ", parameters$min_points,
-    " points; bin ", format(parameters$entropy_bin_width, trim = TRUE),
+    " usable points; bin ", format(parameters$entropy_bin_width, trim = TRUE),
     " mg/dL; m=", parameters$embedding_dimension,
     "; MSE scales 1-", parameters$mse_scale_max,
     "; Higuchi kmax=", parameters$higuchi_kmax
@@ -158,48 +158,21 @@ compute_cgmanalyzer_mse <- function(x, scale_max = 5, embedding_dimension = 2, t
       scales = empty_scales
     ))
   }
-  if (!requireNamespace("CGManalyzer", quietly = TRUE) || !"MSEbyC.fn" %in% getNamespaceExports("CGManalyzer")) {
-    return(list(
-      value = NA_real_,
-      note = "Multiscale sample entropy is not available in this R session.",
-      scales = empty_scales
-    ))
-  }
 
-  old_wd <- getwd()
-  temp_dir <- tempfile("cgm_mse_")
-  dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
-  on.exit({
-    setwd(old_wd)
-    unlink(temp_dir, recursive = TRUE, force = TRUE)
-  }, add = TRUE)
-
-  result <- tryCatch({
-    setwd(temp_dir)
-    CGManalyzer::MSEbyC.fn(
-      x,
-      scaleMax = scale_max,
-      scaleStep = 1,
-      mMin = embedding_dimension,
-      mMax = embedding_dimension,
-      mStep = 1,
-      rMin = tolerance,
-      rMax = tolerance
-    )
-  }, error = function(error) error)
-
-  if (inherits(result, "error")) {
-    return(list(
-      value = NA_real_,
-      note = "Multiscale sample entropy could not be computed for this series.",
-      scales = empty_scales
-    ))
-  }
+  cgm_require_native_symbols("_CGManalyzer2_mse_scales_cpp")
+  result <- mse_scales_cpp(
+    x,
+    scale_max = scale_max,
+    embedding_dimension = as.integer(embedding_dimension %||% 2L),
+    tolerance = as.numeric(tolerance %||% 0.15),
+    max_points = 1000L
+  )
   scale_values <- data.frame(
     Scale = as.numeric(result$Scale),
     SampleEntropy = as.numeric(result$SampleEntropy),
     stringsAsFactors = FALSE
   )
+  scale_values <- scale_values[is.finite(scale_values$Scale) & is.finite(scale_values$SampleEntropy), , drop = FALSE]
   finite_values <- scale_values$SampleEntropy
   finite_values <- finite_values[is.finite(finite_values)]
   if (!length(finite_values)) {
@@ -209,12 +182,15 @@ compute_cgmanalyzer_mse <- function(x, scale_max = 5, embedding_dimension = 2, t
       scales = empty_scales
     ))
   }
-  list(value = NA_real_, note = "", scales = scale_values)
+  note <- if (length(x) > 1000L) {
+    "MSE calculated on an evenly thinned series for large-data responsiveness."
+  } else {
+    ""
+  }
+  list(value = mean(finite_values, na.rm = TRUE), note = note, scales = scale_values)
 }
 
 compute_dfa_details <- function(x) {
-  x <- x[is.finite(x)]
-  n <- length(x)
   empty <- list(
     value = NA_real_,
     curve = data.frame(
@@ -223,37 +199,18 @@ compute_dfa_details <- function(x) {
       stringsAsFactors = FALSE
     )
   )
-  if (n < 32L || length(unique(x)) <= 1L) {
-    return(empty)
-  }
-  y <- cumsum(x - mean(x))
-  windows <- unique(floor(exp(seq(log(8), log(floor(n / 4)), length.out = 8))))
-  windows <- windows[windows >= 8L & windows < n / 2]
-  if (!length(windows)) {
-    return(empty)
-  }
-  fluctuation <- vapply(windows, function(window) {
-    segments <- floor(n / window)
-    if (segments < 2L) {
-      return(NA_real_)
-    }
-    rms <- vapply(seq_len(segments), function(segment) {
-      idx <- ((segment - 1L) * window + 1L):(segment * window)
-      rms_detrended_linear(y[idx])
-    }, numeric(1))
-    sqrt(mean(rms^2, na.rm = TRUE))
-  }, numeric(1))
-  keep <- is.finite(fluctuation) & fluctuation > 0 & windows > 0
+  cgm_require_native_symbols("_CGManalyzer2_dfa_details_cpp")
+  result <- dfa_details_cpp(x)
+  scale_value <- as.numeric(result$scale_value %||% numeric())
+  metric_value <- as.numeric(result$metric_value %||% numeric())
+  keep <- is.finite(scale_value) & is.finite(metric_value)
   curve <- data.frame(
-    scale_value = as.numeric(windows[keep]),
-    metric_value = as.numeric(fluctuation[keep]),
+    scale_value = scale_value[keep],
+    metric_value = metric_value[keep],
     stringsAsFactors = FALSE
   )
-  if (sum(keep) < 2L) {
-    return(list(value = NA_real_, curve = curve))
-  }
   list(
-    value = simple_ols_slope(log(windows[keep]), log(fluctuation[keep])),
+    value = as.numeric(result$value %||% NA_real_),
     curve = curve
   )
 }
@@ -263,8 +220,6 @@ safe_dfa_alpha <- function(x) {
 }
 
 compute_higuchi_details <- function(x, kmax = 8) {
-  x <- x[is.finite(x)]
-  n <- length(x)
   kmax <- as.integer(kmax)
   empty <- list(
     value = NA_real_,
@@ -277,32 +232,18 @@ compute_higuchi_details <- function(x, kmax = 8) {
   if (is.na(kmax) || kmax < 2L) {
     kmax <- 8L
   }
-  if (n < (kmax * 2L) || length(unique(x)) <= 1L) {
-    return(empty)
-  }
-  k_values <- seq_len(kmax)
-  lengths <- vapply(k_values, function(k) {
-    lm_values <- vapply(seq_len(k), function(m) {
-      idx <- seq(m, n, by = k)
-      if (length(idx) < 2L) {
-        return(NA_real_)
-      }
-      curve_length <- sum(abs(diff(x[idx])))
-      curve_length * (n - 1L) / ((length(idx) - 1L) * k)
-    }, numeric(1))
-    mean(lm_values, na.rm = TRUE)
-  }, numeric(1))
-  keep <- is.finite(lengths) & lengths > 0
+  cgm_require_native_symbols("_CGManalyzer2_higuchi_details_cpp")
+  result <- higuchi_details_cpp(x, kmax)
+  scale_value <- as.numeric(result$scale_value %||% numeric())
+  metric_value <- as.numeric(result$metric_value %||% numeric())
+  keep <- is.finite(scale_value) & is.finite(metric_value)
   curve <- data.frame(
-    scale_value = as.numeric(k_values[keep]),
-    metric_value = as.numeric(lengths[keep]),
+    scale_value = scale_value[keep],
+    metric_value = metric_value[keep],
     stringsAsFactors = FALSE
   )
-  if (sum(keep) < 2L) {
-    return(list(value = NA_real_, curve = curve))
-  }
   list(
-    value = simple_ols_slope(log(1 / k_values[keep]), log(lengths[keep])),
+    value = as.numeric(result$value %||% NA_real_),
     curve = curve
   )
 }
@@ -324,6 +265,17 @@ empty_complexity_curve_rows <- function() {
     note = character(),
     stringsAsFactors = FALSE
   )
+}
+
+bind_complexity_rows <- function(rows, empty = data.frame()) {
+  rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
+  if (!length(rows)) {
+    return(empty)
+  }
+  out <- data.table::rbindlist(rows, fill = TRUE)
+  out <- as.data.frame(out, stringsAsFactors = FALSE)
+  row.names(out) <- NULL
+  out
 }
 
 make_complexity_curve_rows <- function(
@@ -422,6 +374,8 @@ complexity_result_columns <- function() {
     gap_count = integer(),
     eligible = logical(),
     notes = character(),
+    series_mode = character(),
+    series_note = character(),
     shannon_entropy = numeric(),
     sample_entropy = numeric(),
     approximate_entropy = numeric(),
@@ -440,16 +394,130 @@ complexity_result_columns <- function() {
   )
 }
 
+complexity_imputed_regular_series <- function(data) {
+  if (!is.data.frame(data) || !nrow(data)) {
+    return(FALSE)
+  }
+  any(data$imputed_flag %in% TRUE, na.rm = TRUE) ||
+    any(data$inserted_timestamp_gap %in% TRUE, na.rm = TRUE) ||
+    ("missing_source" %in% names(data) && any(as.character(data$missing_source) == missing_source_gap(), na.rm = TRUE))
+}
+
+complexity_series_note <- function(series_mode) {
+  if (identical(series_mode, "imputed_regular")) {
+    "Using imputed/generated analysis rows; no additional Complexity regularization was applied."
+  } else {
+    "Using observed finite glucose readings in timestamp order; no interpolation or gap filling was applied."
+  }
+}
+
+prepare_complexity_subject_series <- function(data, parameters = complexity_default_parameters()) {
+  if (!is.data.frame(data) || !nrow(data)) {
+    return(list(
+      id = NA_character_,
+      data = data.frame(),
+      values = numeric(),
+      timestamps = as.POSIXct(character()),
+      series_mode = "observed",
+      series_note = complexity_series_note("observed"),
+      readings = 0L,
+      finite_glucose_rows = 0L,
+      first_timestamp = as.POSIXct(NA),
+      last_timestamp = as.POSIXct(NA),
+      usable_points = 0L,
+      interval_minutes = NA_real_,
+      gap_count = NA_integer_,
+      eligible = FALSE,
+      note = paste0("Needs at least ", parameters$min_points, " usable observed points.")
+    ))
+  }
+
+  subject_id <- as.character(data$id[[1L]])
+  ordered <- data
+  if ("timestamp" %in% names(ordered)) {
+    ordered <- ordered[order(ordered$timestamp), , drop = FALSE]
+  }
+  finite <- is.finite(as.numeric(ordered$glucose)) & !is.na(ordered$timestamp)
+  sequence_data <- ordered[finite, , drop = FALSE]
+  series_mode <- if (complexity_imputed_regular_series(ordered)) "imputed_regular" else "observed"
+  timestamps <- sequence_data$timestamp
+  values <- as.numeric(sequence_data$glucose)
+  interval <- tryCatch(median_sampling_interval(timestamps), error = function(error) NA_real_)
+  timestamps_all <- ordered$timestamp[!is.na(ordered$timestamp)]
+  usable_points <- length(values)
+  eligible <- usable_points >= parameters$min_points
+  point_label <- if (identical(series_mode, "imputed_regular")) "usable imputed/regular analysis points" else "usable observed points"
+  note <- if (eligible) {
+    paste("Eligible.", complexity_series_note(series_mode))
+  } else {
+    paste0("Needs at least ", parameters$min_points, " ", point_label, ". ", complexity_series_note(series_mode))
+  }
+
+  list(
+    id = subject_id,
+    data = sequence_data,
+    values = values,
+    timestamps = timestamps,
+    series_mode = series_mode,
+    series_note = complexity_series_note(series_mode),
+    readings = nrow(ordered),
+    finite_glucose_rows = sum(is.finite(as.numeric(ordered$glucose)), na.rm = TRUE),
+    first_timestamp = if (length(timestamps_all)) min(timestamps_all) else as.POSIXct(NA),
+    last_timestamp = if (length(timestamps_all)) max(timestamps_all) else as.POSIXct(NA),
+    usable_points = usable_points,
+    interval_minutes = as.numeric(interval),
+    gap_count = lightweight_complexity_gap_count(ordered, interval),
+    eligible = eligible,
+    note = note
+  )
+}
+
+complexity_base_result_row <- function(series, parameters, include_mse = FALSE) {
+  data.frame(
+    id = series$id,
+    readings = series$readings,
+    finite_glucose_rows = series$finite_glucose_rows,
+    first_timestamp = series$first_timestamp,
+    last_timestamp = series$last_timestamp,
+    regularized_points = if (identical(series$series_mode, "imputed_regular")) series$usable_points else NA_integer_,
+    usable_points = series$usable_points,
+    interval_minutes = as.numeric(series$interval_minutes),
+    gap_count = series$gap_count,
+    eligible = series$eligible,
+    notes = series$note,
+    series_mode = series$series_mode,
+    series_note = series$series_note,
+    shannon_entropy = NA_real_,
+    sample_entropy = NA_real_,
+    approximate_entropy = NA_real_,
+    multiscale_sample_entropy = NA_real_,
+    hurst_exponent = NA_real_,
+    dfa_alpha = NA_real_,
+    higuchi_fractal_dimension = NA_real_,
+    shannon_entropy_note = "",
+    sample_entropy_note = "",
+    approximate_entropy_note = "",
+    multiscale_sample_entropy_note = if (isTRUE(include_mse)) "" else if (series$eligible) complexity_mse_pending_note() else "",
+    hurst_exponent_note = "",
+    dfa_alpha_note = "",
+    higuchi_fractal_dimension_note = "",
+    stringsAsFactors = FALSE
+  )
+}
+
 split_complexity_subjects <- function(data) {
   if (!is.data.frame(data) || !nrow(data) || !"id" %in% names(data)) {
     return(list())
   }
-  data <- data[!is.na(data$id) & nzchar(as.character(data$id)), , drop = FALSE]
-  if (!nrow(data)) {
+  dt <- data.table::as.data.table(data)
+  dt[, id := as.character(id)]
+  dt <- dt[!is.na(id) & nzchar(id)]
+  if (!nrow(dt)) {
     return(list())
   }
-  ids <- sort(unique(as.character(data$id)))
-  stats::setNames(lapply(ids, function(id) data[as.character(data$id) == id, , drop = FALSE]), ids)
+  data.table::setorder(dt, id)
+  groups <- split(dt, by = "id", sorted = TRUE, keep.by = TRUE)
+  lapply(groups, function(x) as.data.frame(x, stringsAsFactors = FALSE))
 }
 
 compute_complexity_pending_summary <- function(data, parameters, status = "running") {
@@ -468,30 +536,26 @@ compute_complexity_pending_summary <- function(data, parameters, status = "runni
     complexity_pending_note()
   )
   rows <- lapply(subjects, function(x) {
-    subject_id <- as.character(x$id[[1L]])
-    finite_rows <- sum(is.finite(as.numeric(x$glucose)), na.rm = TRUE)
-    timestamps <- x$timestamp[!is.na(x$timestamp)]
-    first_timestamp <- if (length(timestamps)) min(timestamps) else as.POSIXct(NA)
-    last_timestamp <- if (length(timestamps)) max(timestamps) else as.POSIXct(NA)
-    interval <- tryCatch(median_sampling_interval(timestamps), error = function(error) NA_real_)
-    eligible <- finite_rows >= parameters$min_points
-    note <- if (eligible) {
+    series <- prepare_complexity_subject_series(x, parameters)
+    note <- if (series$eligible) {
       if (identical(status, "failed")) complexity_failed_note() else complexity_pending_note()
     } else {
-      paste0("Needs at least ", parameters$min_points, " usable regularized points.")
+      series$note
     }
     data.frame(
-      id = subject_id,
-      readings = nrow(x),
-      finite_glucose_rows = finite_rows,
-      first_timestamp = first_timestamp,
-      last_timestamp = last_timestamp,
-      regularized_points = NA_integer_,
-      usable_points = finite_rows,
-      interval_minutes = as.numeric(interval),
-      gap_count = lightweight_complexity_gap_count(x, interval),
-      eligible = eligible,
+      id = series$id,
+      readings = series$readings,
+      finite_glucose_rows = series$finite_glucose_rows,
+      first_timestamp = series$first_timestamp,
+      last_timestamp = series$last_timestamp,
+      regularized_points = if (identical(series$series_mode, "imputed_regular")) series$usable_points else NA_integer_,
+      usable_points = series$usable_points,
+      interval_minutes = as.numeric(series$interval_minutes),
+      gap_count = series$gap_count,
+      eligible = series$eligible,
       notes = note,
+      series_mode = series$series_mode,
+      series_note = series$series_note,
       shannon_entropy = NA_real_,
       sample_entropy = NA_real_,
       approximate_entropy = NA_real_,
@@ -499,13 +563,13 @@ compute_complexity_pending_summary <- function(data, parameters, status = "runni
       hurst_exponent = NA_real_,
       dfa_alpha = NA_real_,
       higuchi_fractal_dimension = NA_real_,
-      shannon_entropy_note = if (eligible) metric_note else "",
+      shannon_entropy_note = if (series$eligible) metric_note else "",
       sample_entropy_note = "",
       approximate_entropy_note = "",
-      multiscale_sample_entropy_note = if (eligible && !identical(status, "failed")) complexity_mse_pending_note() else if (eligible) complexity_mse_failed_note() else "",
-      hurst_exponent_note = if (eligible) metric_note else "",
-      dfa_alpha_note = if (eligible) metric_note else "",
-      higuchi_fractal_dimension_note = if (eligible) metric_note else "",
+      multiscale_sample_entropy_note = if (series$eligible && !identical(status, "failed")) complexity_mse_pending_note() else if (series$eligible) complexity_mse_failed_note() else "",
+      hurst_exponent_note = if (series$eligible) metric_note else "",
+      dfa_alpha_note = if (series$eligible) metric_note else "",
+      higuchi_fractal_dimension_note = if (series$eligible) metric_note else "",
       stringsAsFactors = FALSE
     )
   })
@@ -515,52 +579,13 @@ compute_complexity_pending_summary <- function(data, parameters, status = "runni
 }
 
 compute_complexity_subject_result <- function(data, parameters, include_mse = FALSE) {
-  subject_id <- as.character(data$id[[1L]])
-  readings <- nrow(data)
-  regular <- regularize_cgm_series(data, max_gap_intervals = parameters$max_gap_intervals)
-  interval <- attr(regular, "interval_minutes", exact = TRUE)
-  gap_count <- lightweight_complexity_gap_count(data, interval)
-  values <- regular$glucose[is.finite(regular$glucose)]
-  usable_points <- length(values)
-  timestamps <- data$timestamp[!is.na(data$timestamp)]
-  eligible <- usable_points >= parameters$min_points
-  note <- if (eligible) {
-    "Eligible"
-  } else {
-    paste0("Needs at least ", parameters$min_points, " usable regularized points.")
-  }
-
-  out <- data.frame(
-    id = subject_id,
-    readings = readings,
-    finite_glucose_rows = sum(is.finite(as.numeric(data$glucose)), na.rm = TRUE),
-    first_timestamp = if (length(timestamps)) min(timestamps) else as.POSIXct(NA),
-    last_timestamp = if (length(timestamps)) max(timestamps) else as.POSIXct(NA),
-    regularized_points = nrow(regular),
-    usable_points = usable_points,
-    interval_minutes = as.numeric(interval),
-    gap_count = gap_count,
-    eligible = eligible,
-    notes = note,
-    shannon_entropy = NA_real_,
-    sample_entropy = NA_real_,
-    approximate_entropy = NA_real_,
-    multiscale_sample_entropy = NA_real_,
-    hurst_exponent = NA_real_,
-    dfa_alpha = NA_real_,
-    higuchi_fractal_dimension = NA_real_,
-    shannon_entropy_note = "",
-    sample_entropy_note = "",
-    approximate_entropy_note = "",
-    multiscale_sample_entropy_note = if (isTRUE(include_mse)) "" else complexity_mse_pending_note(),
-    hurst_exponent_note = "",
-    dfa_alpha_note = "",
-    higuchi_fractal_dimension_note = "",
-    stringsAsFactors = FALSE
-  )
+  series <- prepare_complexity_subject_series(data, parameters)
+  subject_id <- series$id
+  values <- series$values
+  out <- complexity_base_result_row(series, parameters, include_mse = include_mse)
   curves <- empty_complexity_curve_rows()
 
-  if (!eligible) {
+  if (!series$eligible) {
     out$multiscale_sample_entropy_note <- ""
     return(list(metrics = out, curves = curves))
   }
@@ -632,55 +657,19 @@ compute_complexity_subject_result <- function(data, parameters, include_mse = FA
 }
 
 compute_complexity_quick_subject <- function(data, parameters) {
-  subject_id <- as.character(data$id[[1L]])
-  readings <- nrow(data)
-  regular <- regularize_cgm_series(data, max_gap_intervals = parameters$max_gap_intervals)
-  interval <- attr(regular, "interval_minutes", exact = TRUE)
-  gap_count <- lightweight_complexity_gap_count(data, interval)
-  values <- regular$glucose[is.finite(regular$glucose)]
-  usable_points <- length(values)
-  timestamps <- data$timestamp[!is.na(data$timestamp)]
-  eligible <- usable_points >= parameters$min_points
-  note <- if (eligible) {
-    "Eligible"
-  } else {
-    paste0("Needs at least ", parameters$min_points, " usable regularized points.")
+  series <- prepare_complexity_subject_series(data, parameters)
+  out <- complexity_base_result_row(series, parameters)
+  if (series$eligible) {
+    out$multiscale_sample_entropy_note <- complexity_mse_pending_note()
+    out$dfa_alpha_note <- complexity_curve_pending_note()
+    out$higuchi_fractal_dimension_note <- complexity_curve_pending_note()
   }
 
-  out <- data.frame(
-    id = subject_id,
-    readings = readings,
-    finite_glucose_rows = sum(is.finite(as.numeric(data$glucose)), na.rm = TRUE),
-    first_timestamp = if (length(timestamps)) min(timestamps) else as.POSIXct(NA),
-    last_timestamp = if (length(timestamps)) max(timestamps) else as.POSIXct(NA),
-    regularized_points = nrow(regular),
-    usable_points = usable_points,
-    interval_minutes = as.numeric(interval),
-    gap_count = gap_count,
-    eligible = eligible,
-    notes = note,
-    shannon_entropy = NA_real_,
-    sample_entropy = NA_real_,
-    approximate_entropy = NA_real_,
-    multiscale_sample_entropy = NA_real_,
-    hurst_exponent = NA_real_,
-    dfa_alpha = NA_real_,
-    higuchi_fractal_dimension = NA_real_,
-    shannon_entropy_note = "",
-    sample_entropy_note = "",
-    approximate_entropy_note = "",
-    multiscale_sample_entropy_note = if (eligible) complexity_mse_pending_note() else "",
-    hurst_exponent_note = "",
-    dfa_alpha_note = if (eligible) complexity_curve_pending_note() else "",
-    higuchi_fractal_dimension_note = if (eligible) complexity_curve_pending_note() else "",
-    stringsAsFactors = FALSE
-  )
-
-  if (!eligible) {
+  if (!series$eligible) {
     return(out)
   }
 
-  out$shannon_entropy <- shannon_entropy_normalized(values, parameters$entropy_bin_width)
+  out$shannon_entropy <- shannon_entropy_normalized(series$values, parameters$entropy_bin_width)
   out$hurst_exponent_note <- complexity_hurst_pending_note()
   out
 }
@@ -712,19 +701,17 @@ empty_complexity_hurst_rows <- function() {
 }
 
 compute_complexity_hurst_one_subject <- function(data, parameters) {
-  subject_id <- as.character(data$id[[1L]])
-  regular <- regularize_cgm_series(data, max_gap_intervals = parameters$max_gap_intervals)
-  values <- regular$glucose[is.finite(regular$glucose)]
+  series <- prepare_complexity_subject_series(data, parameters)
   out <- data.frame(
-    id = subject_id,
+    id = series$id,
     hurst_exponent = NA_real_,
     hurst_exponent_note = "",
     stringsAsFactors = FALSE
   )
-  if (length(values) < parameters$min_points) {
+  if (!series$eligible) {
     return(out)
   }
-  out$hurst_exponent <- safe_hurst_exponent(values)
+  out$hurst_exponent <- safe_hurst_exponent(series$values)
   out$hurst_exponent_note[is.na(out$hurst_exponent)] <- "Hurst exponent could not be computed for this series."
   out
 }
@@ -755,6 +742,11 @@ merge_complexity_hurst_results <- function(base, hurst_results = NULL, status = 
   eligible <- out$eligible %in% TRUE
 
   if (identical(status, "complete") && is.data.frame(hurst_results) && nrow(hurst_results)) {
+    if (!all(c("id", "hurst_exponent", "hurst_exponent_note") %in% names(hurst_results))) {
+      out$hurst_exponent[eligible] <- NA_real_
+      out$hurst_exponent_note[eligible] <- complexity_hurst_failed_note()
+      return(out)
+    }
     idx <- match(out$id, hurst_results$id)
     matched <- !is.na(idx)
     out$hurst_exponent[matched] <- hurst_results$hurst_exponent[idx[matched]]
@@ -777,10 +769,10 @@ merge_complexity_hurst_results <- function(base, hurst_results = NULL, status = 
 }
 
 compute_dfa_higuchi_curve_one_subject <- function(data, parameters) {
-  subject_id <- as.character(data$id[[1L]])
-  regular <- regularize_cgm_series(data, max_gap_intervals = parameters$max_gap_intervals)
-  values <- regular$glucose[is.finite(regular$glucose)]
-  if (length(values) < parameters$min_points) {
+  series <- prepare_complexity_subject_series(data, parameters)
+  subject_id <- series$id
+  values <- series$values
+  if (!series$eligible) {
     return(empty_complexity_curve_rows())
   }
   curves <- empty_complexity_curve_rows()
@@ -846,10 +838,10 @@ compute_one_complexity_subject <- function(data, parameters, include_mse = FALSE
 }
 
 compute_mse_curve_one_subject <- function(data, parameters) {
-  subject_id <- as.character(data$id[[1L]])
-  regular <- regularize_cgm_series(data, max_gap_intervals = parameters$max_gap_intervals)
-  values <- regular$glucose[is.finite(regular$glucose)]
-  if (length(values) < parameters$min_points) {
+  series <- prepare_complexity_subject_series(data, parameters)
+  subject_id <- series$id
+  values <- series$values
+  if (!series$eligible) {
     return(empty_complexity_curve_rows())
   }
   glucose_sd <- stats::sd(values, na.rm = TRUE)
@@ -882,12 +874,12 @@ compute_mse_curve_one_subject <- function(data, parameters) {
 #' Compute core complexity metrics
 #'
 #' @param data Standardized CGM analysis data.
-#' @param min_points Minimum finite regularized glucose values required.
+#' @param min_points Minimum usable glucose values required after the current preprocessing choice.
 #' @param entropy_bin_width Glucose bin width for Shannon entropy.
 #' @param embedding_dimension Embedding dimension for entropy metrics.
 #' @param mse_scale_max Maximum scale for multiscale sample entropy.
 #' @param higuchi_kmax Maximum k for Higuchi fractal dimension.
-#' @param max_gap_intervals Maximum gap intervals to interpolate during regularization.
+#' @param max_gap_intervals Legacy compatibility parameter; non-imputed Complexity does not regularize.
 #' @param include_mse Whether to compute multiscale sample entropy synchronously.
 #'
 #' @return One row per Subject ID with complexity metrics and eligibility details.
@@ -972,22 +964,13 @@ compute_complexity_bundle <- function(data, parameters, include_mse = TRUE) {
   }
   subjects <- split_complexity_subjects(data)
   if (!length(subjects)) {
-    return(list(metrics = complexity_result_columns(), curves = data.frame()))
+    return(list(metrics = complexity_result_columns(), curves = empty_complexity_curve_rows()))
   }
   subject_results <- lapply(subjects, function(subject_data) {
     compute_complexity_subject_result(subject_data, parameters, include_mse = include_mse)
   })
-  metrics <- do.call(rbind, lapply(subject_results, `[[`, "metrics"))
-  row.names(metrics) <- NULL
-  curves <- lapply(subject_results, `[[`, "curves")
-  curves <- curves[vapply(curves, nrow, integer(1)) > 0L]
-  curves <- if (length(curves)) {
-    out <- do.call(rbind, curves)
-    row.names(out) <- NULL
-    out
-  } else {
-    empty_complexity_curve_rows()
-  }
+  metrics <- bind_complexity_rows(lapply(subject_results, `[[`, "metrics"), empty = complexity_result_columns())
+  curves <- bind_complexity_rows(lapply(subject_results, `[[`, "curves"), empty = empty_complexity_curve_rows())
   list(metrics = metrics, curves = curves)
 }
 
@@ -1137,13 +1120,7 @@ filter_complexity_curves <- function(
 }
 
 complexity_compute_key <- function(data, parameters) {
-  paste(
-    utils::capture.output(utils::str(list(
-      data = cgm_data_signature(data),
-      parameters = parameters
-    ))),
-    collapse = "\n"
-  )
+  cgm_cache_key(cgm_data_signature(data), parameters)
 }
 
 complexity_group_lookup <- function(data) {
@@ -1182,19 +1159,7 @@ prepare_complexity_metrics_display <- function(results, data = NULL, show_subjec
   rows <- lapply(seq_len(nrow(results)), function(i) {
     result <- results[i, , drop = FALSE]
     values <- as.numeric(unlist(result[1L, catalog$raw_name], use.names = FALSE))
-    metric_notes <- vapply(catalog$raw_name, function(metric) {
-      note_col <- paste0(metric, "_note")
-      specific_note <- if (note_col %in% names(result)) as.character(result[[note_col]][[1L]]) else ""
-      if (nzchar(specific_note)) {
-        specific_note
-      } else if (!result$eligible) {
-        result$notes
-      } else if (is.na(as.numeric(result[[metric]][[1L]]))) {
-        "Could not compute for this series."
-      } else {
-        ""
-      }
-    }, character(1))
+    metric_notes <- vapply(catalog$raw_name, function(metric) complexity_metric_note(result, metric), character(1))
     subject <- as.character(result$id)
     row <- data.frame(
       `Subject ID` = result$id,
@@ -1314,7 +1279,7 @@ complexity_mse_status_text <- function(status = "idle") {
   switch(
     status %||% "idle",
     running = "MSE running: multiscale entropy is calculating in the background.",
-    complete = "MSE available: multiscale entropy scale curves have been added to the current results.",
+    complete = "MSE finished: scale curves are shown when finite values are available.",
     failed = "MSE could not compute for the current selection. Fast complexity metrics remain available.",
     ""
   )
@@ -1344,7 +1309,7 @@ complexity_curve_status_text <- function(status = "idle") {
   switch(
     status %||% "idle",
     running = "DFA/Higuchi curves running: scale curves are calculating.",
-    complete = "DFA/Higuchi curves available.",
+    complete = "DFA/Higuchi curves finished: scale curves are shown when finite values are available.",
     failed = "DFA/Higuchi curves could not compute for the current selection.",
     ""
   )
@@ -1353,12 +1318,15 @@ complexity_curve_status_text <- function(status = "idle") {
 complexity_metric_note <- function(result, metric) {
   note_col <- paste0(metric, "_note")
   specific_note <- if (note_col %in% names(result)) as.character(result[[note_col]][[1L]]) else ""
+  series_note <- if ("series_note" %in% names(result)) as.character(result$series_note[[1L]]) else ""
   if (nzchar(specific_note)) {
     specific_note
   } else if (!isTRUE(result$eligible[[1L]])) {
     as.character(result$notes[[1L]])
   } else if (is.na(as.numeric(result[[metric]][[1L]]))) {
     "Could not compute for this series."
+  } else if (nzchar(series_note)) {
+    series_note
   } else {
     ""
   }

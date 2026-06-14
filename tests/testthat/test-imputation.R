@@ -148,6 +148,46 @@ test_that("run_cgmissingdata_imputation missing-rate fallback can use expanded p
   expect_equal(attr(result, "cgmissingdata_model"), "auto")
 })
 
+test_that("CGMissingDataR external messages are suppressed during imputation", {
+  local_mocked_bindings(
+    cgmissingdata_version = function() numeric_version("0.0.2"),
+    cgmissingdata_function = function() {
+      function(...) {
+        message("Gap found in data for subject id: 1013")
+        warning("external warning")
+        data.frame(
+          .row_id = c(1L, 2L),
+          subject_index = c(1L, 1L),
+          time = c("2026-05-06T00:00:00", "2026-05-06T00:05:00"),
+          glucose = c(100, NA),
+          imputed_glucose_value = c(100, 111),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  )
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp(c("2026-05-06 00:00:00", "2026-05-06 00:05:00")),
+    glucose = c(100, NA_real_),
+    imputed_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  messages <- character()
+  withCallingHandlers(
+    result <- run_cgmissingdata_imputation(data, interval_minutes = 5),
+    message = function(message) {
+      messages <<- c(messages, conditionMessage(message))
+      invokeRestart("muffleMessage")
+    }
+  )
+
+  expect_false(any(grepl("Gap found", messages, fixed = TRUE)))
+  expect_equal(result$imputed_glucose_value[[2L]], 111)
+  expect_equal(attr(result, "cgmissingdata_warnings"), "external warning")
+})
+
 test_that("CGMissingDataR model argument mapping supports enhanced model choices", {
   data <- data.frame(
     id = "A",

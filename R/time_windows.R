@@ -55,8 +55,9 @@ time_window_filter_choices <- function() {
 }
 
 time_window_minutes <- function(timestamp) {
-  timestamp <- as.POSIXlt(timestamp)
-  timestamp$hour * 60 + timestamp$min + timestamp$sec / 60
+  data.table::hour(timestamp) * 60 +
+    data.table::minute(timestamp) +
+    data.table::second(timestamp) / 60
 }
 
 filter_time_window_data <- function(data, time_window = default_time_window()) {

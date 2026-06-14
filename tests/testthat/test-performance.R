@@ -14,12 +14,29 @@ test_that("data signatures change when important data features change", {
   expect_false(identical(threshold_signature(default_cgm_thresholds()), threshold_signature(modifyList(default_cgm_thresholds(), list(tir_upper = 190)))))
 })
 
+test_that("compact cache keys are deterministic for nested signatures", {
+  sig <- list(rows = 2L, participants = 1L, id_sources = "mapped")
+  thresholds <- threshold_signature(default_cgm_thresholds())
+
+  expect_equal(cgm_cache_key(sig, thresholds), cgm_cache_key(thresholds, sig))
+  expect_true(grepl("rows=2", cgm_cache_key(sig), fixed = TRUE))
+})
+
+test_that("finite timestamp checks keep POSIXct values allocation-light", {
+  timestamp <- parse_cgm_timestamp(c("2026-05-05 08:00:00", NA))
+
+  expect_equal(is_finite_cgm_timestamp(timestamp), c(TRUE, FALSE))
+  expect_equal(is_finite_cgm_timestamp(c(1, Inf, NA)), c(TRUE, FALSE, FALSE))
+})
+
 test_that("performance timing is disabled by default and can write logs when enabled", {
   old_enabled <- getOption("CGMA.performance_log")
   old_file <- getOption("CGMA.performance_log_file")
+  old_run_id <- getOption("CGMA.performance_run_id")
   on.exit({
     options(CGMA.performance_log = old_enabled)
     options(CGMA.performance_log_file = old_file)
+    options(CGMA.performance_run_id = old_run_id)
   }, add = TRUE)
 
   options(CGMA.performance_log = FALSE, CGMA.performance_log_file = FALSE)
@@ -35,9 +52,11 @@ test_that("performance timing is disabled by default and can write logs when ena
   )
   expect_equal(nrow(value), 3)
   log <- utils::read.csv(file, stringsAsFactors = FALSE)
+  expect_true(all(c("run_id", "start_time", "end_time", "timestamp", "elapsed_seconds") %in% names(log)))
   expect_equal(log$label, "enabled_test")
   expect_equal(log$rows, 3L)
   expect_equal(log$status, "ok")
+  expect_true(is.numeric(log$elapsed_seconds))
 
   expect_message(
     expect_error(cgm_timed("error_test", stop("boom", call. = FALSE)), "boom"),
@@ -47,6 +66,9 @@ test_that("performance timing is disabled by default and can write logs when ena
   error_row <- log[log$label == "error_test", , drop = FALSE]
   expect_equal(error_row$status, "error")
   expect_true(grepl("error_message=boom", error_row$context, fixed = TRUE))
+
+  options(CGMA.performance_run_id = "20260613-010203", CGMA.performance_log_file = TRUE)
+  expect_true(grepl("performance-20260613-010203\\.csv$", cgm_performance_log_file()))
 })
 
 test_that("non-CGMA diagnostic messages can be suppressed without hiding performance logs", {

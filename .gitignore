@@ -1,3 +1,7 @@
 dev_notes/
 10.1177_19322968251353228.pdf
 .Rprofile
+.VSCodeCounter
+src/*.dll
+src/*.o
+.local-build-artifacts/

@@ -30,6 +30,41 @@ test_that("compute_core_metrics calculates core glucose summaries", {
   expect_equal(sort(unique(all_metrics$metric_period)), c("daytime", "full_day"))
 })
 
+test_that("metric adapters fill-bind uneven optional columns across periods", {
+  data <- data.frame(
+    id = c("A", "A"),
+    timestamp = parse_cgm_timestamp(c("2026-05-05 01:00:00", "2026-05-05 08:00:00")),
+    glucose = c(100, 120),
+    group = "Control",
+    stringsAsFactors = FALSE
+  )
+  local_mocked_bindings(
+    compute_cgmanalyzer_metrics = function(data, by = "id", ...) {
+      out <- unique(data[, by, drop = FALSE])
+      out$conga_12h <- 1
+      if (nrow(data) > 1L) {
+        out$period_only_cgmanalyzer <- 2
+      }
+      out
+    },
+    compute_iglu_metrics = function(data, by = "id", ...) {
+      out <- unique(data[, by, drop = FALSE])
+      out$lbgi <- 3
+      if (nrow(data) == 1L) {
+        out$period_only_iglu <- 4
+      }
+      out
+    }
+  )
+
+  adapters <- compute_metric_adapters(data, by = c("id", "group"), periods = c("full_day", "daytime", "nighttime"))
+
+  expect_equal(sort(unique(adapters$metric_period)), c("daytime", "full_day", "nighttime"))
+  expect_true(all(c("period_only_cgmanalyzer", "period_only_iglu") %in% names(adapters)))
+  expect_true(all(is.na(adapters$period_only_iglu[adapters$metric_period == "full_day"])))
+  expect_true(all(is.na(adapters$period_only_cgmanalyzer[adapters$metric_period != "full_day"])))
+})
+
 test_that("period metrics produce full-day daytime and nighttime rows when data exist", {
   data <- data.frame(
     id = rep("A", 4),
@@ -50,6 +85,128 @@ test_that("period metrics produce full-day daytime and nighttime rows when data 
   expect_equal(metrics$readings[metrics$metric_period == "full_day"], 4)
   expect_equal(metrics$readings[metrics$metric_period == "daytime"], 2)
   expect_equal(metrics$readings[metrics$metric_period == "nighttime"], 2)
+})
+
+test_that("base metric batches match per-subject metric states", {
+  data <- data.frame(
+    id = rep(c("A", "B"), each = 4),
+    timestamp = parse_cgm_timestamp(rep(c(
+      "2026-05-05 01:00:00",
+      "2026-05-05 06:00:00",
+      "2026-05-05 12:00:00",
+      "2026-05-05 23:55:00"
+    ), 2)),
+    glucose = c(90, 110, 130, 150, 80, 100, 120, 140),
+    group = rep(c("Control", "Treatment"), each = 4),
+    stringsAsFactors = FALSE
+  )
+  thresholds <- default_cgm_thresholds()
+
+  batch <- metrics_compute_base_batch(data, c("A", "B"), thresholds)
+  per_subject <- lapply(c("A", "B"), function(id) {
+    compute_base_metric_state(data[as.character(data$id) == id, , drop = FALSE], thresholds = thresholds)
+  })
+  names(per_subject) <- c("A", "B")
+
+  for (id in names(per_subject)) {
+    expect_equal(batch[[id]]$base_state$status, per_subject[[id]]$status)
+    expect_equal(batch[[id]]$base_state$base, per_subject[[id]]$base, tolerance = 1e-8)
+    expect_equal(batch[[id]]$base_state$display, per_subject[[id]]$display, tolerance = 1e-8)
+  }
+})
+
+test_that("metric store tracks selected-on-demand cached IDs", {
+  store <- metrics_make_store("key", c("A", "B"), selected = "A")
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp("2026-05-05 08:00:00"),
+    glucose = 100,
+    group = "Control",
+    stringsAsFactors = FALSE
+  )
+  base <- compute_base_core_metrics(data)
+
+  expect_false(metrics_store_base_complete(store))
+  expect_equal(metrics_store_cached_ids(store), character())
+  expect_true(grepl("0 of 2", metrics_progress_text(store), fixed = TRUE))
+
+  metrics_store_set(store, "A", list(
+    id = "A",
+    status = "base_ready",
+    base_state = metric_state(
+      "base_ready",
+      data = data,
+      base = base,
+      display = prepare_metrics_display(base)
+    ),
+    adapters = NULL,
+    adapter_status = "idle"
+  ))
+
+  expect_equal(metrics_store_cached_ids(store), "A")
+  expect_false(metrics_store_base_complete(store))
+  expect_equal(metrics_aggregate_entries(store), base)
+})
+
+test_that("base metric rows remain available while optional adapters are pending", {
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp("2026-05-05 08:00:00"),
+    glucose = 100,
+    group = "Control",
+    stringsAsFactors = FALSE
+  )
+  base <- compute_base_core_metrics(data)
+  store <- metrics_make_store("key", "A", selected = "A")
+  metrics_store_set(store, "A", list(
+    id = "A",
+    status = "base_ready",
+    base_state = metric_state(
+      "base_ready",
+      data = data,
+      base = base,
+      display = prepare_metrics_display(base)
+    ),
+    adapters = NULL,
+    adapter_status = "pending"
+  ))
+
+  raw <- metrics_entry_raw(metrics_store_get(store, "A"))
+
+  expect_equal(raw, base)
+  expect_false(any(c("conga_12h", "lbgi") %in% names(raw)))
+})
+
+test_that("metric entry updates replace nested data frames without recursive row errors", {
+  data <- data.frame(
+    id = rep("A", 3),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 01:00:00",
+      "2026-05-05 08:00:00",
+      "2026-05-05 20:00:00"
+    )),
+    glucose = c(100, 110, 120),
+    group = "Control",
+    stringsAsFactors = FALSE
+  )
+  completed <- metrics_compute_subject(data, "A", default_cgm_thresholds())
+  placeholder <- list(
+    id = "A",
+    status = "running",
+    base_state = metrics_calculating_state(
+      data,
+      "Metrics are calculating for the selected Subject ID."
+    ),
+    adapter_status = "pending"
+  )
+
+  entry <- metrics_entry_replace_fields(placeholder, completed, "A")
+  raw <- metrics_entry_raw(entry)
+
+  expect_equal(entry$status, "base_ready")
+  expect_true(nrow(entry$base_state$display) > 0)
+  expect_setequal(unique(raw$metric_period), time_window_values())
+  expect_true(is.data.frame(entry$base_state$base))
 })
 
 test_that("base core metrics are available without adapter columns", {
@@ -186,6 +343,66 @@ test_that("metrics module reports empty analysis data through testServer", {
       expect_equal(state$message, "No CGM rows are available for the selected analysis date range.")
       expect_equal(nrow(metrics()), 0)
       expect_false(should_start_additional_metrics(state))
+    }
+  )
+})
+
+test_that("selected metric computation uses only requested Subject ID", {
+  data <- data.frame(
+    id = rep(c("A", "B"), each = 2),
+    timestamp = parse_cgm_timestamp(rep(c("2026-05-05 08:00:00", "2026-05-05 08:05:00"), 2)),
+    glucose = c(100, 110, 200, 210),
+    group = rep(c("Control", "Treatment"), each = 2),
+    stringsAsFactors = FALSE
+  )
+  local_mocked_bindings(
+    compute_metric_adapters = function(data, by = default_metric_groups(data), ...) {
+      expect_equal(unique(as.character(data$id)), "B")
+      data.frame(
+        id = "B",
+        group = "Treatment",
+        metric_period = "full_day",
+        lbgi = 1,
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+
+  entry <- metrics_compute_subject(data, "B", default_cgm_thresholds())
+
+  expect_equal(entry$id, "B")
+  expect_equal(entry$status, "base_ready")
+  expect_equal(unique(as.character(entry$base_state$base$id)), "B")
+  expect_equal(unique(as.character(entry$adapters$id)), "B")
+})
+
+test_that("metrics module inactive-tab reactive returns cached-only rows", {
+  data <- data.frame(
+    id = "A",
+    timestamp = parse_cgm_timestamp("2026-05-05 08:00:00"),
+    glucose = 100,
+    group = "Control",
+    stringsAsFactors = FALSE
+  )
+  base_calls <- 0L
+  local_mocked_bindings(
+    compute_base_core_metrics = function(...) {
+      base_calls <<- base_calls + 1L
+      stop("inactive metrics should not compute base rows", call. = FALSE)
+    }
+  )
+
+  shiny::testServer(
+    metrics_module_server,
+    args = list(
+      standardized = shiny::reactive(data),
+      settings = shiny::reactive(create_reproducibility_settings()),
+      active_tab = function() "statistics"
+    ),
+    {
+      out <- metrics()
+      expect_equal(base_calls, 0L)
+      expect_equal(nrow(out), 0L)
     }
   )
 })

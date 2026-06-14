@@ -62,6 +62,25 @@ test_that("run_metric_stat_test filters period rows before testing", {
   expect_true(is.finite(daytime_result$`P-value`))
 })
 
+test_that("statistics module does not evaluate metrics while inactive", {
+  calls <- 0L
+
+  shiny::testServer(
+    stats_module_server,
+    args = list(
+      metrics = shiny::reactive({
+        calls <<- calls + 1L
+        stop("inactive statistics tab should not request metrics", call. = FALSE)
+      }),
+      active_tab = function() "data"
+    ),
+    {
+      session$flushReact()
+      expect_equal(calls, 0L)
+    }
+  )
+})
+
 test_that("subject metadata attaches to metric rows without splitting calculations", {
   data <- data.frame(
     id = rep(c("S1", "S2"), each = 2),

@@ -32,6 +32,44 @@ test_that("canonical missingness example fixture has intentional missing values 
   expect_equal(summary$estimated_missing_readings, c(2, 0))
 })
 
+test_that("shared missingness review cache reuses identical data date and interval keys", {
+  data <- missingness_fixture()
+  date_range <- c(start = as.Date("2026-05-01"), end = as.Date("2026-05-01"))
+  cache <- new.env(parent = emptyenv())
+  calls <- 0L
+  compute <- function(label) {
+    force(label)
+    calls <<- calls + 1L
+    data.frame(label = label, calls = calls, stringsAsFactors = FALSE)
+  }
+
+  key <- analysis_missingness_review_cache_key(data, date_range, 60)
+  first <- shared_missingness_review_cached(cache, key, function() compute("first"))
+  second <- shared_missingness_review_cached(cache, key, function() compute("second"))
+
+  expect_equal(calls, 1L)
+  expect_equal(first, second)
+  expect_equal(second$label, "first")
+
+  interval_key <- analysis_missingness_review_cache_key(data, date_range, 30)
+  interval_changed <- shared_missingness_review_cached(cache, interval_key, function() compute("interval"))
+  expect_equal(calls, 2L)
+  expect_equal(interval_changed$label, "interval")
+
+  date_key <- analysis_missingness_review_cache_key(
+    data,
+    c(start = as.Date("2026-05-01"), end = as.Date("2026-05-02")),
+    30
+  )
+  date_changed <- shared_missingness_review_cached(cache, date_key, function() compute("date"))
+  expect_equal(calls, 3L)
+  expect_equal(date_changed$label, "date")
+
+  same_key_again <- shared_missingness_review_cached(cache, date_key, function() compute("unrelated-ui"))
+  expect_equal(calls, 3L)
+  expect_equal(same_key_again$label, "date")
+})
+
 test_that("detect_gap_periods reports known timestamp gaps", {
   data <- data.frame(
     id = "A",

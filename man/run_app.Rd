@@ -2,7 +2,7 @@
 % Please edit documentation in R/run_app.R
 \name{run_app}
 \alias{run_app}
-\title{Run the CGMAnalyzerShiny app}
+\title{Run the CGManalyzer2 app}
 \usage{
 run_app(...)
 }
@@ -13,5 +13,5 @@ run_app(...)
 A Shiny application object.
 }
 \description{
-Run the CGMAnalyzerShiny app
+Run the CGManalyzer2 app
 }

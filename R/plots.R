@@ -379,7 +379,10 @@ plot_day_filter_choices <- function(
 }
 
 is_finite_cgm_timestamp <- function(timestamp) {
-  !is.na(timestamp) & is.finite(as.numeric(timestamp))
+  if (inherits(timestamp, "POSIXct")) {
+    return(!is.na(timestamp))
+  }
+  !is.na(timestamp) & is.finite(suppressWarnings(as.numeric(timestamp)))
 }
 
 plot_empty_message <- function(plot_type = "trace") {

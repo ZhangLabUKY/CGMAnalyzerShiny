@@ -109,6 +109,32 @@ test_that("timestamp parser option can enable lubridate compatibility", {
   expect_equal(format_cgm_timestamp_iso(parsed), "2026-05-05T08:05:00")
 })
 
+test_that("timestamp parse summary uses a bounded diagnostic sample", {
+  raw <- c(
+    rep("2026-05-05 08:00:00", 10),
+    "bad time",
+    rep("01-02-2019 02:49", 10)
+  )
+
+  summary <- timestamp_parse_summary(raw, sample_size = 12)
+
+  expect_equal(summary$rows, length(raw))
+  expect_equal(summary$sampled_rows, 12)
+  expect_true(summary$sample_based)
+  expect_equal(summary$parsed_timestamps, 11)
+  expect_equal(summary$failed_timestamps, 1)
+  expect_equal(summary$ambiguous_timestamps, 1)
+})
+
+test_that("fast timestamp parsing handles year-first values and leaves invalid rows missing", {
+  raw <- c(rep("2026-05-05 08:00:00", 350), "not a timestamp")
+  parsed <- parse_cgm_timestamp(raw, tz = "UTC", timestamp_parser = "compatibility")
+
+  expect_equal(sum(!is.na(parsed)), 350L)
+  expect_true(is.na(parsed[[351L]]))
+  expect_equal(format_cgm_timestamp_iso(parsed[[1L]]), "2026-05-05T08:00:00")
+})
+
 test_that("ambiguous day and month timestamps default to day first", {
   raw <- data.frame(
     id = "A",

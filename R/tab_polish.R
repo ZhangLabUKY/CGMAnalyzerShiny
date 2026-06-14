@@ -126,14 +126,36 @@ glucose_parse_summary <- function(
 timestamp_validation_summary <- function(
   upload = NULL,
   mapping = NULL,
+  standardized_data = NULL,
   tz = "UTC"
 ) {
-  data <- if (is.list(upload)) upload$data else NULL
   timestamp_col <- if (is.list(mapping)) {
     clean_mapping_value(mapping$timestamp)
   } else {
     NA_character_
   }
+  if (is.data.frame(standardized_data) && nrow(standardized_data) && "timestamp" %in% names(standardized_data)) {
+    parsed <- standardized_data$timestamp
+    finite <- is_finite_cgm_timestamp(parsed)
+    summary <- data.frame(
+      rows = nrow(standardized_data),
+      sampled_rows = nrow(standardized_data),
+      sample_based = FALSE,
+      non_missing_timestamps = sum(!is.na(parsed)),
+      parsed_timestamps = sum(finite),
+      failed_timestamps = sum(is.na(parsed)),
+      ambiguous_timestamps = 0L,
+      date_only_timestamps = 0L,
+      first_timestamp = if (any(finite)) min(parsed[finite], na.rm = TRUE) else as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz),
+      last_timestamp = if (any(finite)) max(parsed[finite], na.rm = TRUE) else as.POSIXct(NA_real_, origin = "1970-01-01", tz = tz),
+      stringsAsFactors = FALSE
+    )
+    summary$timestamp_column <- if (is.na(timestamp_col)) "timestamp" else timestamp_col
+    summary$example_failed_values <- ""
+    return(summary)
+  }
+
+  data <- if (is.list(upload)) upload$data else NULL
   if (
     !is.data.frame(data) ||
       !nrow(data) ||
@@ -144,10 +166,13 @@ timestamp_validation_summary <- function(
   }
   summary <- timestamp_parse_summary(data[[timestamp_col]], tz = tz)
   summary$timestamp_column <- timestamp_col
-  failed <- !is.na(trimws(as.character(data[[timestamp_col]]))) &
-    nzchar(trimws(as.character(data[[timestamp_col]]))) &
-    is.na(parse_cgm_timestamp(data[[timestamp_col]], tz = tz, timestamp_parser = "compatibility"))
-  examples <- unique(as.character(data[[timestamp_col]][failed]))
+  sample_rows <- seq_len(min(nrow(data), summary$sampled_rows %||% 5000L))
+  timestamp_values <- data[[timestamp_col]][sample_rows]
+  timestamp_chr <- trimws(as.character(timestamp_values))
+  failed <- !is.na(timestamp_chr) &
+    nzchar(timestamp_chr) &
+    is.na(parse_cgm_timestamp(timestamp_values, tz = tz, timestamp_parser = "compatibility"))
+  examples <- unique(as.character(timestamp_values[failed]))
   summary$example_failed_values <- paste(
     examples[seq_len(min(length(examples), 3L))],
     collapse = ", "
@@ -158,16 +183,37 @@ timestamp_validation_summary <- function(
 glucose_validation_summary <- function(
   upload = NULL,
   mapping = NULL,
+  standardized_data = NULL,
   glucose_min = 40,
   glucose_max = 400
 ) {
-  data <- if (is.list(upload)) upload$data else NULL
   glucose_col <- if (is.list(mapping)) {
     clean_mapping_value(mapping$glucose)
   } else {
     NA_character_
   }
   units <- if (is.list(mapping)) mapping$source_units %||% "mg/dL" else "mg/dL"
+  if (is.data.frame(standardized_data) && nrow(standardized_data) && "glucose" %in% names(standardized_data)) {
+    glucose <- as.numeric(standardized_data$glucose)
+    numeric_rows <- !is.na(glucose)
+    summary <- data.frame(
+      rows = nrow(standardized_data),
+      non_missing_glucose = sum(numeric_rows),
+      numeric_glucose = sum(numeric_rows),
+      missing_glucose = sum(!numeric_rows),
+      non_numeric_glucose = 0L,
+      min_glucose = if (any(numeric_rows)) min(glucose[numeric_rows], na.rm = TRUE) else NA_real_,
+      max_glucose = if (any(numeric_rows)) max(glucose[numeric_rows], na.rm = TRUE) else NA_real_,
+      implausible_glucose = sum(numeric_rows & (glucose < glucose_min | glucose > glucose_max), na.rm = TRUE),
+      suspicious_units = FALSE,
+      units = "mg/dL",
+      stringsAsFactors = FALSE
+    )
+    summary$glucose_column <- if (is.na(glucose_col)) "glucose" else glucose_col
+    return(summary)
+  }
+
+  data <- if (is.list(upload)) upload$data else NULL
   if (
     !is.data.frame(data) ||
       !nrow(data) ||
@@ -197,11 +243,12 @@ validation_status <- function(ok, warning = FALSE) {
 data_validation_rows <- function(
   upload = NULL,
   mapping = NULL,
+  standardized_data = NULL,
   standardization_error = NULL,
   settings = NULL
 ) {
-  timestamp <- timestamp_validation_summary(upload, mapping)
-  glucose <- glucose_validation_summary(upload, mapping)
+  timestamp <- timestamp_validation_summary(upload, mapping, standardized_data = standardized_data)
+  glucose <- glucose_validation_summary(upload, mapping, standardized_data = standardized_data)
 
   timestamp_ready <- !is.null(timestamp) && timestamp$failed_timestamps == 0L
   glucose_ready <- !is.null(glucose) && glucose$non_numeric_glucose == 0L
@@ -288,7 +335,24 @@ data_validation_rows <- function(
   rows
 }
 
-timestamp_summary_display <- function(summary) {
+validation_missingness_value <- function(missingness_review, column, default = NA_real_) {
+  if (
+    is.data.frame(missingness_review) &&
+      nrow(missingness_review) &&
+      column %in% names(missingness_review)
+  ) {
+    return(missingness_review[[column]][[1L]])
+  }
+  default
+}
+
+validation_missingness_available <- function(missingness_review) {
+  is.data.frame(missingness_review) &&
+    nrow(missingness_review) &&
+    all(c("rows", "missing_glucose", "explicit_missing_glucose", "estimated_missing_readings") %in% names(missingness_review))
+}
+
+timestamp_summary_display <- function(summary, missingness_review = NULL) {
   if (is.null(summary)) {
     return(data.frame(
       Label = character(),
@@ -296,9 +360,43 @@ timestamp_summary_display <- function(summary) {
       stringsAsFactors = FALSE
     ))
   }
+  if (validation_missingness_available(missingness_review)) {
+    estimated_missing <- validation_missingness_value(missingness_review, "estimated_missing_readings")
+    expected_rows <- validation_missingness_value(missingness_review, "rows")
+    return(data.frame(
+      Label = c(
+        "Expected readings reviewed",
+        "Uploaded parsed timestamps",
+        "Inferred timestamp-gap readings",
+        "Invalid uploaded timestamps",
+        "Ambiguous date values",
+        "Date-only values",
+        "Date span"
+      ),
+      Value = c(
+        format_count(expected_rows),
+        format_count(summary$parsed_timestamps),
+        ifelse(is.na(estimated_missing), "Not available", format_count(estimated_missing)),
+        format_count(summary$failed_timestamps),
+        format_count(summary$ambiguous_timestamps),
+        format_count(summary$date_only_timestamps %||% 0L),
+        if (is.na(summary$first_timestamp)) {
+          "Not available"
+        } else {
+          paste(
+            format(summary$first_timestamp, "%Y-%m-%d"),
+            "to",
+            format(summary$last_timestamp, "%Y-%m-%d")
+          )
+        }
+      ),
+      stringsAsFactors = FALSE
+    ))
+  }
   data.frame(
     Label = c(
       "Rows",
+      if (isTRUE(summary$sample_based)) "Diagnostic sample" else character(),
       "Parsed timestamps",
       "Invalid timestamps",
       "Ambiguous date values",
@@ -307,6 +405,7 @@ timestamp_summary_display <- function(summary) {
     ),
     Value = c(
       format_count(summary$rows),
+      if (isTRUE(summary$sample_based)) format_count(summary$sampled_rows) else character(),
       format_count(summary$parsed_timestamps),
       format_count(summary$failed_timestamps),
       format_count(summary$ambiguous_timestamps),
@@ -325,11 +424,48 @@ timestamp_summary_display <- function(summary) {
   )
 }
 
-glucose_summary_display <- function(summary) {
+glucose_summary_display <- function(summary, missingness_review = NULL) {
   if (is.null(summary)) {
     return(data.frame(
       Label = character(),
       Value = character(),
+      stringsAsFactors = FALSE
+    ))
+  }
+  if (validation_missingness_available(missingness_review)) {
+    expected_rows <- validation_missingness_value(missingness_review, "rows")
+    missing_glucose <- validation_missingness_value(missingness_review, "missing_glucose")
+    explicit_missing <- validation_missingness_value(missingness_review, "explicit_missing_glucose")
+    estimated_missing <- validation_missingness_value(missingness_review, "estimated_missing_readings")
+    return(data.frame(
+      Label = c(
+        "Expected readings reviewed",
+        "Available numeric glucose",
+        "Missing glucose or inferred gap readings",
+        "Uploaded blank glucose rows",
+        "Inferred timestamp-gap readings",
+        "Non-numeric uploaded glucose",
+        "Minimum",
+        "Maximum"
+      ),
+      Value = c(
+        format_count(expected_rows),
+        format_count(summary$numeric_glucose),
+        format_count(missing_glucose),
+        format_count(explicit_missing),
+        ifelse(is.na(estimated_missing), "Not available", format_count(estimated_missing)),
+        format_count(summary$non_numeric_glucose),
+        ifelse(
+          is.na(summary$min_glucose),
+          "Not available",
+          round(summary$min_glucose, 1)
+        ),
+        ifelse(
+          is.na(summary$max_glucose),
+          "Not available",
+          round(summary$max_glucose, 1)
+        )
+      ),
       stringsAsFactors = FALSE
     ))
   }
@@ -951,6 +1087,7 @@ data_status_summary <- function(
   validation <- data_validation_rows(
     upload = upload,
     mapping = mapping,
+    standardized_data = standardized_data,
     standardization_error = standardization_error,
     settings = settings
   )
@@ -1225,17 +1362,20 @@ validation_checklist_ui <- function(rows) {
 data_validation_panel_ui <- function(
   upload = NULL,
   mapping = NULL,
+  standardized_data = NULL,
   standardization_error = NULL,
-  settings = NULL
+  settings = NULL,
+  missingness_review = NULL
 ) {
-  timestamp <- timestamp_validation_summary(upload, mapping)
-  glucose <- glucose_validation_summary(upload, mapping)
+  timestamp <- timestamp_validation_summary(upload, mapping, standardized_data = standardized_data)
+  glucose <- glucose_validation_summary(upload, mapping, standardized_data = standardized_data)
   warnings <- data_validation_warnings(timestamp, glucose)
   shiny::tagList(
     shiny::h4("Data validation"),
     validation_checklist_ui(data_validation_rows(
       upload,
       mapping,
+      standardized_data,
       standardization_error,
       settings
     )),
@@ -1243,12 +1383,12 @@ data_validation_panel_ui <- function(
       shiny::column(
         6,
         shiny::h5("Timestamp summary"),
-        summary_card_ui(timestamp_summary_display(timestamp), compact = TRUE)
+        summary_card_ui(timestamp_summary_display(timestamp, missingness_review = missingness_review), compact = TRUE)
       ),
       shiny::column(
         6,
         shiny::h5("Glucose summary"),
-        summary_card_ui(glucose_summary_display(glucose), compact = TRUE)
+        summary_card_ui(glucose_summary_display(glucose, missingness_review = missingness_review), compact = TRUE)
       )
     ),
     if (length(warnings)) {
@@ -1261,6 +1401,12 @@ data_validation_panel_ui <- function(
       shiny::div(
         class = "alert alert-success",
         "Mapped timestamp and glucose columns look ready for analysis."
+      )
+    },
+    if (is.data.frame(missingness_review) && nrow(missingness_review)) {
+      shiny::tagList(
+        shiny::h4("Missingness review"),
+        imputation_summary_box_ui(missingness_review)
       )
     }
   )

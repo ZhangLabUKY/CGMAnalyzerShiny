@@ -1,11 +1,11 @@
-#' CGMAnalyzerShiny
+#' CGManalyzer2
 #'
 #' Modular Shiny application for continuous glucose monitoring analysis.
 #'
 #' @keywords internal
 #' @import data.table
 #' @importFrom Rcpp evalCpp
-#' @useDynLib CGMAnalyzerShiny, .registration = TRUE
+#' @useDynLib CGManalyzer2, .registration = TRUE
 "_PACKAGE"
 
 utils::globalVariables(c(
@@ -16,7 +16,7 @@ utils::globalVariables(c(
   ".missing_sort",
   ".original_order",
   ".previous_timestamp",
-  "_CGMAnalyzerShiny_lttb_indices_cpp",
+  "_CGManalyzer2_lttb_indices_cpp",
   "coverage_percent",
   "calendar_x",
   "date",
@@ -67,6 +67,11 @@ utils::globalVariables(c(
   "status",
   "Study window status",
   "Subject ID",
+  "_CGManalyzer2_dfa_details_cpp",
+  "_CGManalyzer2_higuchi_details_cpp",
+  "_CGManalyzer2_optional_lag_metrics_by_time_cpp",
+  "_CGManalyzer2_optional_metrics_cpp",
+  "_CGManalyzer2_mse_scales_cpp",
   "time",
   "time_bin",
   "time_minutes",

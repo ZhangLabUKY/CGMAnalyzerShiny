@@ -260,6 +260,17 @@ valid_metric_thresholds <- function(thresholds) {
   }, logical(1)))
 }
 
+bind_metric_rows <- function(rows) {
+  rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
+  if (!length(rows)) {
+    return(data.frame())
+  }
+  out <- data.table::rbindlist(rows, fill = TRUE)
+  out <- as.data.frame(out, stringsAsFactors = FALSE)
+  row.names(out) <- NULL
+  out
+}
+
 compute_metric_adapters <- function(
   data,
   by = default_metric_groups(data),
@@ -276,8 +287,20 @@ compute_metric_adapters <- function(
     if (!nrow(period_data)) {
       return(NULL)
     }
-    out <- compute_cgmanalyzer_metrics(period_data, by = by)
-    out <- merge_metric_adapter(out, compute_iglu_metrics(period_data, by = by), by = by)
+    out <- cgm_timed(
+      "metrics_optional_lag_adapter",
+      compute_cgmanalyzer_metrics(period_data, by = by),
+      context = list(period = period)
+    )
+    out <- merge_metric_adapter(
+      out,
+      cgm_timed(
+        "metrics_optional_risk_adapter",
+        compute_iglu_metrics(period_data, by = by),
+        context = list(period = period)
+      ),
+      by = by
+    )
     if (!nrow(out)) {
       return(NULL)
     }
@@ -288,9 +311,7 @@ compute_metric_adapters <- function(
   if (!length(period_rows)) {
     return(data.frame())
   }
-  out <- do.call(rbind, period_rows)
-  row.names(out) <- NULL
-  out
+  bind_metric_rows(period_rows)
 }
 
 merge_core_metric_outputs <- function(base, adapters, by = default_metric_groups(base)) {
@@ -302,8 +323,7 @@ merge_core_metric_outputs <- function(base, adapters, by = default_metric_groups
   out$metric_engine <- paste(
     c(
       "base_fallback",
-      if (requireNamespace("CGManalyzer", quietly = TRUE)) "CGManalyzer",
-      if (requireNamespace("iglu", quietly = TRUE)) "iglu"
+      "internal_optional"
     ),
     collapse = "+"
   )

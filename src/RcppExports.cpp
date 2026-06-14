@@ -12,7 +12,7 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 
 // lttb_indices_cpp
 IntegerVector lttb_indices_cpp(NumericVector x, NumericVector y, int n_out);
-RcppExport SEXP _CGMAnalyzerShiny_lttb_indices_cpp(SEXP xSEXP, SEXP ySEXP, SEXP n_outSEXP) {
+RcppExport SEXP _CGManalyzer2_lttb_indices_cpp(SEXP xSEXP, SEXP ySEXP, SEXP n_outSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -23,13 +23,81 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// dfa_details_cpp
+List dfa_details_cpp(NumericVector x);
+RcppExport SEXP _CGManalyzer2_dfa_details_cpp(SEXP xSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    rcpp_result_gen = Rcpp::wrap(dfa_details_cpp(x));
+    return rcpp_result_gen;
+END_RCPP
+}
+// higuchi_details_cpp
+List higuchi_details_cpp(NumericVector x, int kmax);
+RcppExport SEXP _CGManalyzer2_higuchi_details_cpp(SEXP xSEXP, SEXP kmaxSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    Rcpp::traits::input_parameter< int >::type kmax(kmaxSEXP);
+    rcpp_result_gen = Rcpp::wrap(higuchi_details_cpp(x, kmax));
+    return rcpp_result_gen;
+END_RCPP
+}
+// optional_lag_metrics_by_time_cpp
+List optional_lag_metrics_by_time_cpp(NumericVector timestamp, NumericVector glucose, double tolerance_seconds);
+RcppExport SEXP _CGManalyzer2_optional_lag_metrics_by_time_cpp(SEXP timestampSEXP, SEXP glucoseSEXP, SEXP tolerance_secondsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type timestamp(timestampSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type glucose(glucoseSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance_seconds(tolerance_secondsSEXP);
+    rcpp_result_gen = Rcpp::wrap(optional_lag_metrics_by_time_cpp(timestamp, glucose, tolerance_seconds));
+    return rcpp_result_gen;
+END_RCPP
+}
+// optional_metrics_cpp
+List optional_metrics_cpp(NumericVector glucose, double interval_minutes);
+RcppExport SEXP _CGManalyzer2_optional_metrics_cpp(SEXP glucoseSEXP, SEXP interval_minutesSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type glucose(glucoseSEXP);
+    Rcpp::traits::input_parameter< double >::type interval_minutes(interval_minutesSEXP);
+    rcpp_result_gen = Rcpp::wrap(optional_metrics_cpp(glucose, interval_minutes));
+    return rcpp_result_gen;
+END_RCPP
+}
+// mse_scales_cpp
+List mse_scales_cpp(NumericVector x, int scale_max, int embedding_dimension, double tolerance, int max_points);
+RcppExport SEXP _CGManalyzer2_mse_scales_cpp(SEXP xSEXP, SEXP scale_maxSEXP, SEXP embedding_dimensionSEXP, SEXP toleranceSEXP, SEXP max_pointsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    Rcpp::traits::input_parameter< int >::type scale_max(scale_maxSEXP);
+    Rcpp::traits::input_parameter< int >::type embedding_dimension(embedding_dimensionSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    Rcpp::traits::input_parameter< int >::type max_points(max_pointsSEXP);
+    rcpp_result_gen = Rcpp::wrap(mse_scales_cpp(x, scale_max, embedding_dimension, tolerance, max_points));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_CGMAnalyzerShiny_lttb_indices_cpp", (DL_FUNC) &_CGMAnalyzerShiny_lttb_indices_cpp, 3},
+    {"_CGManalyzer2_lttb_indices_cpp", (DL_FUNC) &_CGManalyzer2_lttb_indices_cpp, 3},
+    {"_CGManalyzer2_dfa_details_cpp", (DL_FUNC) &_CGManalyzer2_dfa_details_cpp, 1},
+    {"_CGManalyzer2_higuchi_details_cpp", (DL_FUNC) &_CGManalyzer2_higuchi_details_cpp, 2},
+    {"_CGManalyzer2_optional_lag_metrics_by_time_cpp", (DL_FUNC) &_CGManalyzer2_optional_lag_metrics_by_time_cpp, 3},
+    {"_CGManalyzer2_optional_metrics_cpp", (DL_FUNC) &_CGManalyzer2_optional_metrics_cpp, 2},
+    {"_CGManalyzer2_mse_scales_cpp", (DL_FUNC) &_CGManalyzer2_mse_scales_cpp, 5},
     {NULL, NULL, 0}
 };
 
-RcppExport void R_init_CGMAnalyzerShiny(DllInfo *dll) {
+RcppExport void R_init_CGManalyzer2(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
 }

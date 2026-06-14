@@ -11,3 +11,5 @@
 ^README\.Rmd$
 ^\.Rprofile$
 ^codecov\.yml$
+^\.VSCodeCounter$
+^\.local-build-artifacts$

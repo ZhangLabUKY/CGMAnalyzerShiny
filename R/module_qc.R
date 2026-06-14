@@ -696,7 +696,7 @@ qc_module_server <- function(
         DT::datatable(display, options = list(scrollX = TRUE, pageLength = 10)),
         rows = nrow(display)
       )
-    })
+    }, server = TRUE)
 
     output$qc_review_ui <- shiny::renderUI({
       quality_qc_review_ui(
@@ -722,7 +722,7 @@ qc_module_server <- function(
         DT::datatable(table, rownames = FALSE, options = list(scrollX = FALSE, pageLength = 10)),
         rows = nrow(table)
       )
-    })
+    }, server = TRUE)
 
     output$duplicate_timestamp_note <- shiny::renderUI({
       note <- duplicate_timestamp_note(qc_summary(), analysis_data())
@@ -754,7 +754,7 @@ qc_module_server <- function(
         DT::datatable(display, rownames = FALSE, options = list(scrollX = FALSE, pageLength = 10)),
         rows = nrow(display)
       )
-    })
+    }, server = TRUE)
 
     output$day_coverage_warning_note <- shiny::renderUI({
       note <- day_coverage_warning_note(day_coverage_summary())

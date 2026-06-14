@@ -7,6 +7,14 @@ default_cgm_thresholds <- function() {
   )
 }
 
+app_package_name <- function() {
+  "CGManalyzer2"
+}
+
+app_display_name <- function() {
+  "CGManalyzer2"
+}
+
 `%||%` <- function(x, y) {
   if (is.null(x)) y else x
 }
@@ -23,7 +31,7 @@ app_version <- function() {
     }
   }
   installed_version <- tryCatch(
-    utils::packageDescription("CGMAnalyzerShiny", fields = "Version"),
+    utils::packageDescription(app_package_name(), fields = "Version"),
     error = function(error) NA_character_
   )
   if (!is.na(installed_version) && nzchar(installed_version)) {
@@ -39,7 +47,7 @@ app_version_label <- function() {
 app_brand_ui <- function() {
   shiny::span(
     class = "cgm-brand-stack",
-    shiny::span(class = "cgm-brand-name", "CGMAnalyzerShiny"),
+    shiny::span(class = "cgm-brand-name", app_display_name()),
     shiny::span(class = "cgm-version-label", app_version_label())
   )
 }
@@ -56,7 +64,7 @@ app_theme_css_path <- function() {
   package_path <- system.file(
     "www",
     "cgm-theme.css",
-    package = "CGMAnalyzerShiny"
+    package = app_package_name()
   )
   if (nzchar(package_path)) {
     return(package_path)
@@ -124,7 +132,7 @@ create_reproducibility_settings <- function(
     imputation_study_end <- as.character(analysis_date_range[[2L]])
   }
   list(
-    app = "CGMAnalyzerShiny",
+    app = app_display_name(),
     created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
     timestamp_format = "YYYY-MM-DDThh:mm:ss",
     ambiguous_timestamp_rule = "day_first",

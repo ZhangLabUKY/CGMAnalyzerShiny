@@ -2,6 +2,26 @@
 # Generator token: 10BE3573-1514-4C36-9D1C-5A225CD40393
 
 lttb_indices_cpp <- function(x, y, n_out) {
-    .Call(`_CGMAnalyzerShiny_lttb_indices_cpp`, x, y, n_out)
+    .Call(`_CGManalyzer2_lttb_indices_cpp`, x, y, n_out)
+}
+
+dfa_details_cpp <- function(x) {
+    .Call(`_CGManalyzer2_dfa_details_cpp`, x)
+}
+
+higuchi_details_cpp <- function(x, kmax = 8L) {
+    .Call(`_CGManalyzer2_higuchi_details_cpp`, x, kmax)
+}
+
+optional_lag_metrics_by_time_cpp <- function(timestamp, glucose, tolerance_seconds = NA_real_) {
+    .Call(`_CGManalyzer2_optional_lag_metrics_by_time_cpp`, timestamp, glucose, tolerance_seconds)
+}
+
+optional_metrics_cpp <- function(glucose, interval_minutes = NA_real_) {
+    .Call(`_CGManalyzer2_optional_metrics_cpp`, glucose, interval_minutes)
+}
+
+mse_scales_cpp <- function(x, scale_max = 5L, embedding_dimension = 2L, tolerance = 0.15, max_points = 1000L) {
+    .Call(`_CGManalyzer2_mse_scales_cpp`, x, scale_max, embedding_dimension, tolerance, max_points)
 }
 

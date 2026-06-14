@@ -31,3 +31,13 @@ test_that("time window filtering applies ADA-style boundaries", {
   expect_equal(daytime$glucose, c(2, 3, 6))
   expect_equal(nighttime$glucose, c(1, 4, 5))
 })
+
+test_that("time window minute extraction avoids changing POSIXct semantics", {
+  timestamp <- parse_cgm_timestamp(c(
+    "2026-05-05 00:00:30",
+    "2026-05-05 06:15:00",
+    "2026-05-05 23:59:30"
+  ))
+
+  expect_equal(time_window_minutes(timestamp), c(0.5, 375, 1439.5))
+})

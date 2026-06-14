@@ -300,6 +300,19 @@ filter_metrics_display <- function(
   display
 }
 
+metrics_display_table_frame <- function(display) {
+  required <- c("Subject ID", "Group", "Period", "Category", "Metric", "Definition", "Value", "Units")
+  if (!is.data.frame(display)) {
+    display <- empty_metrics_display()
+  }
+  for (name in setdiff(required, names(display))) {
+    display[[name]] <- if (identical(name, "Value")) numeric(nrow(display)) else rep("", nrow(display))
+  }
+  display <- display[, required, drop = FALSE]
+  row.names(display) <- NULL
+  display
+}
+
 metric_test_choices <- function(metrics, thresholds = default_cgm_thresholds()) {
   catalog <- metric_display_catalog(thresholds = thresholds)
   available <- catalog[catalog$raw_name %in% names(metrics), , drop = FALSE]
@@ -359,7 +372,7 @@ optional_metric_note_text <- function(status) {
 metrics_table_options <- function(display) {
   category_index <- match("Category", names(display)) - 1L
   options <- list(scrollX = FALSE, pageLength = 15)
-  if (!is.na(category_index)) {
+  if (!is.na(category_index) && nrow(display) > 0L) {
     options$rowGroup <- list(dataSrc = category_index)
     options$order <- list(list(category_index, "asc"))
     options$columnDefs <- list(list(targets = category_index, visible = FALSE))

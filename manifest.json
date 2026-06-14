@@ -5358,29 +5358,68 @@
     ".github/workflows/test-coverage.yaml": {
       "checksum": "e2de69bedb15f5e6abb6c9579be3a5d3"
     },
+    ".local-build-artifacts/CGManalyzer2.dll": {
+      "checksum": "fbee8e9a421f59b589aa31955f7d1311"
+    },
+    ".local-build-artifacts/CGMAnalyzerShiny.dll": {
+      "checksum": "23a0fb1e6a40661539a67246bfd00ec9"
+    },
+    ".local-build-artifacts/lttb.o": {
+      "checksum": "b21c275fd886b5d0350a9c499ae7fe59"
+    },
+    ".local-build-artifacts/RcppExports.o": {
+      "checksum": "4b76bdb158a3ff79851d47b9a0e8a2b6"
+    },
     ".Rbuildignore": {
-      "checksum": "94465aa0116691eab0369dfc02853503"
+      "checksum": "c8d4831b20781fd7ba7a7e64c3c17bc0"
     },
     ".Rprofile": {
-      "checksum": "62c3ea79f9635243daf3c3f40497d6bc"
+      "checksum": "22c9567ee15f9383a768e3b0c4fbf5ac"
+    },
+    ".VSCodeCounter/2026-06-11_14-42-01/details.md": {
+      "checksum": "812752b2ea957927ed7f26340aca8e41"
+    },
+    ".VSCodeCounter/2026-06-11_14-42-01/diff-details.md": {
+      "checksum": "667e0ec642c7e9414004653bfd7f209b"
+    },
+    ".VSCodeCounter/2026-06-11_14-42-01/diff.csv": {
+      "checksum": "98a2cb84b3f20d0079a7e1e55c244678"
+    },
+    ".VSCodeCounter/2026-06-11_14-42-01/diff.md": {
+      "checksum": "fadb09cd056dca7a742ee85ba463cc9e"
+    },
+    ".VSCodeCounter/2026-06-11_14-42-01/diff.txt": {
+      "checksum": "0c0d00bf7c1c05feaa6c0c0348108381"
+    },
+    ".VSCodeCounter/2026-06-11_14-42-01/results.csv": {
+      "checksum": "e83c535248092dbe68222befae1c879f"
+    },
+    ".VSCodeCounter/2026-06-11_14-42-01/results.json": {
+      "checksum": "2abec458644a2f8e24f7fd974495d846"
+    },
+    ".VSCodeCounter/2026-06-11_14-42-01/results.md": {
+      "checksum": "74767ddbcf4b15f70ff0637d19a41cc4"
+    },
+    ".VSCodeCounter/2026-06-11_14-42-01/results.txt": {
+      "checksum": "d26fa269786dd8286f003d0689c93b73"
     },
     "10.1177_19322968251353228.pdf": {
       "checksum": "11cf2ac7657433bafd3b976acdef20f8"
     },
     "app.R": {
-      "checksum": "345df413e2ecef14f48af87d0f8953d4"
+      "checksum": "9d5f5da8ab019e37d961f3df94f00d9f"
     },
     "codecov.yml": {
       "checksum": "57544e4a6ad5ca1009e911ffd5bd337b"
     },
     "DESCRIPTION": {
-      "checksum": "3a7d96094bd9db1df278eb910f6740b1"
+      "checksum": "fa18ab8b591e2bef33d6dbba2068fa8e"
     },
     "dev_notes/backlog.md": {
-      "checksum": "8bc3db13af176c99fa8776eac92a0a6f"
+      "checksum": "9f445c198a57825fa7af2f9277dc32d8"
     },
     "dev_notes/decisions.md": {
-      "checksum": "02032b3e62456d18e31ca87128f6c0b2"
+      "checksum": "bb2bd7fb1bffaec9f16efaadb738d0b2"
     },
     "dev_notes/logs/performance-20260531.csv": {
       "checksum": "bc1582797880161479cabd440423f5a5"
@@ -5391,6 +5430,51 @@
     "dev_notes/logs/performance-20260610.csv": {
       "checksum": "36b53d5810b3c5c4a8fdb40740c3148b"
     },
+    "dev_notes/logs/performance-20260611.csv": {
+      "checksum": "38ba21bbcd30fdd297e5da99b356fa16"
+    },
+    "dev_notes/logs/performance-20260612.csv": {
+      "checksum": "7ede064b85873f14ed22079795e5af0f"
+    },
+    "dev_notes/logs/performance-20260613-191210.csv": {
+      "checksum": "a0cf3e270da3a12bd4218e6f00fc4f97"
+    },
+    "dev_notes/logs/performance-20260613-192616.csv": {
+      "checksum": "31c1c736fd0969b941ad57f14824320e"
+    },
+    "dev_notes/logs/performance-20260613-192915.csv": {
+      "checksum": "308d944e348f1e5a6c7052022809cae5"
+    },
+    "dev_notes/logs/performance-20260613-195520.csv": {
+      "checksum": "a9f5acaee15b5ded6cd6d0514b777d5f"
+    },
+    "dev_notes/logs/performance-20260613-195829.csv": {
+      "checksum": "63b8b20d928e53f83adddb8355addb7b"
+    },
+    "dev_notes/logs/performance-20260613-201442.csv": {
+      "checksum": "d8c5db1a8ee8571936a229f3f8d57bfb"
+    },
+    "dev_notes/logs/performance-20260613-201511.csv": {
+      "checksum": "d278dc98a0f376e6eef872347fb7942b"
+    },
+    "dev_notes/logs/performance-20260613-201636.csv": {
+      "checksum": "ba6694d1d91d8fbc5152ae9be256ddc2"
+    },
+    "dev_notes/logs/performance-20260613-202615.csv": {
+      "checksum": "d8eb9a961802a99fde854842712edc37"
+    },
+    "dev_notes/logs/performance-20260613-210740.csv": {
+      "checksum": "2411a7ef6fc043b847191efee6a6a00a"
+    },
+    "dev_notes/logs/performance-20260613-212633.csv": {
+      "checksum": "e12a24362731628997d26448bf463d44"
+    },
+    "dev_notes/logs/performance-20260613-214825.csv": {
+      "checksum": "3328813a10a73014a9e5228bb48095cd"
+    },
+    "dev_notes/logs/performance-20260613.csv": {
+      "checksum": "154b10ea9c2423b428db928b39436e45"
+    },
     "dev_notes/logs/shiny-3838.err.log": {
       "checksum": "d41d8cd98f00b204e9800998ecf8427e"
     },
@@ -5398,13 +5482,13 @@
       "checksum": "d41d8cd98f00b204e9800998ecf8427e"
     },
     "dev_notes/manual_qa.md": {
-      "checksum": "147cbc6503bd2b3e0e0f6b87249f3ff4"
+      "checksum": "60b65149c51761652b00a5091bfe5ff4"
     },
     "dev_notes/progress.md": {
-      "checksum": "4b477c2301e7e3ba8251049dad86ae55"
+      "checksum": "a4f24cef91cce8f07edcb4cec26843d8"
     },
     "dev_notes/README.md": {
-      "checksum": "d636e94addd43467e81f899aecdac6a4"
+      "checksum": "53318e0fe9ad9508dccf8087a727ce0d"
     },
     "dev_notes/roadmap.md": {
       "checksum": "73aaaba66c70e8fd8a970f4890b88f3a"
@@ -5419,28 +5503,28 @@
       "checksum": "bd81423b0e8092952e18625fcd943c72"
     },
     "inst/www/cgm-theme.css": {
-      "checksum": "091d2395bd609ccffbf55eca45300294"
+      "checksum": "bad8ed0900293799c410e41b09e709da"
     },
     "LICENSE.md": {
       "checksum": "3d82780e8917b360cbee7b9ec3e40734"
     },
-    "man/CGMAnalyzerShiny-package.Rd": {
-      "checksum": "39e4c3f445cf65e44ccbaa6616bb4356"
+    "man/CGManalyzer2-package.Rd": {
+      "checksum": "0383c8592469563738f191bbb2876104"
     },
     "man/run_app.Rd": {
-      "checksum": "da4303ce2d6c964c0baee91a546a2a86"
+      "checksum": "82f5d9c788b57664000a8718343a4264"
     },
     "NAMESPACE": {
-      "checksum": "5e306134f25e0c2914e9fba6ceee2b88"
+      "checksum": "d3fd9b769a175c3a0c45e89c4505a5c4"
     },
     "R/analysis_scope.R": {
       "checksum": "51aac7e926f602d8c16efe2dc117c543"
     },
     "R/app_config.R": {
-      "checksum": "4b56cc366d53ef17c949413511f15c6d"
+      "checksum": "e9918348e3f82ab88eb44bc7f30732f5"
     },
     "R/app_server.R": {
-      "checksum": "99e8a6d696f74af7a2fa75693ee6411d"
+      "checksum": "d4df7a0cc10573b20176cb68dc870ce6"
     },
     "R/app_ui.R": {
       "checksum": "3dd2852deba1f26a8897e44c91ca0fe7"
@@ -5451,14 +5535,14 @@
     "R/background_workers.R": {
       "checksum": "34641efc974a586e0746ba6f4f3c17c6"
     },
-    "R/CGMAnalyzerShiny-package.R": {
-      "checksum": "ed94771633838dfc83334f5eed11e51f"
+    "R/CGManalyzer2-package.R": {
+      "checksum": "d07ddf7ee4015894c5559e017f7e101a"
     },
     "R/complexity.R": {
-      "checksum": "b94e5974bf308c56fa65e115fcc0ea7c"
+      "checksum": "5bc235e89e84f7c40a31e32b6d8e521e"
     },
     "R/data_standardization.R": {
-      "checksum": "8c5b6ffa1f2fdd2f9bb2e6136cb75d26"
+      "checksum": "10d9d620224983ef5aa061cf7891d4be"
     },
     "R/filter_choices.R": {
       "checksum": "8ef27b3aa768e4abda4043f20a7d797f"
@@ -5467,31 +5551,31 @@
       "checksum": "40af312bcb7907bf65465c5c04457ac1"
     },
     "R/imputation.R": {
-      "checksum": "bee638d26092adaf8ffa961fd9f53699"
+      "checksum": "a26a3b052419916d5e079cd33126ed6f"
     },
     "R/metric_adapters.R": {
-      "checksum": "57e7f00cc78bbad74ec18e8de391ad32"
+      "checksum": "2b789bb7041f6c2b9d78b85ebf52dc0b"
     },
     "R/metric_display.R": {
-      "checksum": "4d959cc0513d06a79853cf13db61401b"
+      "checksum": "7bea9bb1da60ede61752df3fe5181756"
     },
     "R/metrics.R": {
-      "checksum": "44721006b65c1dfd1b27a2ebf617595d"
+      "checksum": "3d5b5704b47a52494460a3dbabc7feec"
     },
     "R/missingness.R": {
-      "checksum": "8cca5ec7cc783a3d86755b2dc4573056"
+      "checksum": "55a34815e2b67dddc6a7225d0e382bfd"
     },
     "R/module_column_mapping.R": {
       "checksum": "29b6f574c784d137d25ddf7817ebb9a0"
     },
     "R/module_complexity.R": {
-      "checksum": "a719f428466b63636d7f84b41c619193"
+      "checksum": "ca222f37264c4341e471f6b4b51d70d0"
     },
     "R/module_export.R": {
-      "checksum": "b5f423ce61e621b8441ad5216eca41dd"
+      "checksum": "0b0f0dd13e67479a054dae2300d4bc84"
     },
     "R/module_metrics.R": {
-      "checksum": "ae546c52323ab37e6e725a44936b5901"
+      "checksum": "82b50c990289a8ddbcea467b0c3d7cd6"
     },
     "R/module_plots.R": {
       "checksum": "ad5256578622db16bc6cff162139401a"
@@ -5500,31 +5584,34 @@
       "checksum": "4863b2d46b283afd036d8e601bb620f1"
     },
     "R/module_qc.R": {
-      "checksum": "49ee9bf1fb958a6f3c1d7a361762e9be"
+      "checksum": "7d96f2ece2ca5347915001bcd70ed734"
     },
     "R/module_stats.R": {
-      "checksum": "ee1e95721349f684de0de49378c6ab6b"
+      "checksum": "1de17650a27692b4ef526324ccc94e65"
     },
     "R/module_upload.R": {
       "checksum": "448aa495367d8abb3035e93857da374e"
     },
+    "R/native_symbols.R": {
+      "checksum": "3ca50891f2cf4f16524d6db8bf0a733f"
+    },
     "R/performance.R": {
-      "checksum": "946335b86de03a5cf1d0965f7a0c9fd7"
+      "checksum": "91ce63ef608a8fb5f3c78db9d0d275d4"
     },
     "R/plotly_helpers.R": {
       "checksum": "a55cc4ba87cb6cdf95ac212c445df8d9"
     },
     "R/plots.R": {
-      "checksum": "3340d38d97be1821835ef136b6283240"
+      "checksum": "41d5a6b7b1c9af274ce68fd73f9e67fe"
     },
     "R/qc.R": {
       "checksum": "524dfe97a427fdac24173ab826369044"
     },
     "R/RcppExports.R": {
-      "checksum": "4417a627f79c74b5a41f5fdeec9d346b"
+      "checksum": "901e605df7413fa370aa6ef562bf1531"
     },
     "R/run_app.R": {
-      "checksum": "439e45ce7c1ee85565403c2935b36cc8"
+      "checksum": "2aa265292625c24b6b3cce80072577d5"
     },
     "R/statistics.R": {
       "checksum": "11d07ed2e7c616233b1b74a54940e421"
@@ -5533,34 +5620,79 @@
       "checksum": "6a41347915f6b2f6add68304f60ae3c8"
     },
     "R/tab_polish.R": {
-      "checksum": "b2677b26a1201f19be8e6cdfa5cb97f6"
+      "checksum": "6b90f70ee2dc764ff1f8bfdd85e5fb9e"
     },
     "R/tab_state.R": {
       "checksum": "9beb7b1a7bc7b9f1ba6417ce9b8677ad"
     },
     "R/time_windows.R": {
-      "checksum": "de683bf9542546d8e7ba9260b77fe64c"
+      "checksum": "a6694ed0b520409997cf570d58093bee"
     },
     "R/upload_preview.R": {
       "checksum": "87cdf7f9d6d9a56cff99033be3805e10"
     },
     "README.md": {
-      "checksum": "fdc82dfd3ed955ecddb90c35a404a14b"
+      "checksum": "f813742aa102c99fadd6f14763c20cc8"
     },
     "README.Rmd": {
-      "checksum": "44e8ed1f0b5a17e8707a0c2858297c14"
+      "checksum": "064e0eb2623d11af07a63b9d69207859"
+    },
+    "src/CGManalyzer2.dll": {
+      "checksum": "4a8e3e38df9bb928dd4a60fea218344f"
     },
     "src/lttb.cpp": {
-      "checksum": "5a7b159a8884a492092220dc48ce34de"
+      "checksum": "a089bd53301e7f9dbc362cf380e07bf6"
+    },
+    "src/lttb.o": {
+      "checksum": "b21c275fd886b5d0350a9c499ae7fe59"
     },
     "src/RcppExports.cpp": {
-      "checksum": "833baa06fe22d559119079ae03a8deb7"
+      "checksum": "f229c2057d9f7762101fb3c1bd331f48"
+    },
+    "src/RcppExports.o": {
+      "checksum": "4b76bdb158a3ff79851d47b9a0e8a2b6"
     },
     "tests/testthat.R": {
-      "checksum": "69780998900c27d2b14732a76a64f6f9"
+      "checksum": "6b2cd1aa04daec5165b4f6014c23f923"
     },
     "tests/testthat/dev_notes/logs/performance-20260531.csv": {
       "checksum": "06d8310c67d51406d2ef6ca7c2493210"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260611.csv": {
+      "checksum": "270275c4fe6f4b616379164ee0cb30cd"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260612.csv": {
+      "checksum": "e487a6287958a55bbb980941f23d4158"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260613-190927.csv": {
+      "checksum": "3cd79e35da5ce6e73dad0ef4841720c4"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260613-192347.csv": {
+      "checksum": "490c8e55490ebe9b6e6973ec1d8096fb"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260613-195303.csv": {
+      "checksum": "d444e8e74933fc5090ab5375d796de6f"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260613-201802.csv": {
+      "checksum": "debe9346354af50a0728b5b6e4ab84e2"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260613-210513.csv": {
+      "checksum": "a5f4989f35d7b75c143d985bb6a059b6"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260613-212256.csv": {
+      "checksum": "8993d3f6b886847e06562600cdca230b"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260613-212526.csv": {
+      "checksum": "4d4c3e974bb7f913b50110bb8d1c6bf3"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260613-214518.csv": {
+      "checksum": "73bd50b782b49166056823ba950bea0f"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260613-221802.csv": {
+      "checksum": "ec21fbce6e42ed14d3ac07be2061b548"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260613.csv": {
+      "checksum": "a6b12866aa798b094dbcb3b1edbb0db7"
     },
     "tests/testthat/helper-example-data.R": {
       "checksum": "ac7a680bc4fe45f6b2d3e2eb8c4ae796"
@@ -5575,13 +5707,13 @@
       "checksum": "22f394cf3417d3f3a2712d2ec8c7c07c"
     },
     "tests/testthat/test-complexity.R": {
-      "checksum": "5b61dc74a91b05fec65569b2a49c19fd"
+      "checksum": "e439bfbf9e4d620d85a102ec914d1895"
     },
     "tests/testthat/test-demo-data.R": {
       "checksum": "35d7ab1481eb47f74e190b18b0f807df"
     },
     "tests/testthat/test-export.R": {
-      "checksum": "951f03096120f7c5db0058611dac825c"
+      "checksum": "e83b6c8173bbae5f0e269a51d2c5570d"
     },
     "tests/testthat/test-filter-choices.R": {
       "checksum": "cc68b2d9560fe0f16b8525cf45887048"
@@ -5590,22 +5722,22 @@
       "checksum": "ac74e6618df815f917c339cb7cbf88c0"
     },
     "tests/testthat/test-imputation.R": {
-      "checksum": "982cb40b29021d803d67ee80a0fac13b"
+      "checksum": "bd2a8fe80fc85bbdf569d52d2e72feb3"
     },
     "tests/testthat/test-metric-adapters.R": {
-      "checksum": "e9b4dab54b21c9370d6ae45d4bf40716"
+      "checksum": "d126c06aa0e991ea042039115f101ef0"
     },
     "tests/testthat/test-metric-display.R": {
-      "checksum": "16354240db3ad519b526e29e11ee0dc1"
+      "checksum": "d9147084110744ed54841e1cd61b4186"
     },
     "tests/testthat/test-metrics.R": {
-      "checksum": "55cdf15d9716f006cc194240e0162902"
+      "checksum": "b514ab2a822d899db2d21b57de9556da"
     },
     "tests/testthat/test-missingness.R": {
-      "checksum": "d385f81a353a31fbebd9675190ee4d01"
+      "checksum": "859ad217cd0326546f50add652f02d85"
     },
     "tests/testthat/test-performance.R": {
-      "checksum": "39d920e7739f09c5d31cd5797399f561"
+      "checksum": "79d88b1610024f4fdd45087a758f9194"
     },
     "tests/testthat/test-plots.R": {
       "checksum": "9f2939e91a34a9342aad788593c8d3c0"
@@ -5614,28 +5746,28 @@
       "checksum": "76b21420a8b94202111c87b62a69ce20"
     },
     "tests/testthat/test-rcpp-lttb.R": {
-      "checksum": "6a4253f98df5351d8e823bc86cd7a4ee"
+      "checksum": "a879c399f620f8298f7eea7a931e761e"
     },
     "tests/testthat/test-standardization.R": {
-      "checksum": "88bea7503dda268d6db5970d35c52c2a"
+      "checksum": "16ead2e5546902e4dfcdad9ad961fe59"
     },
     "tests/testthat/test-statistics.R": {
-      "checksum": "ef3aba878259994050aa3f5044c3f191"
+      "checksum": "2fdb7791e68bcb44b425699fb1493b35"
     },
     "tests/testthat/test-subject-filters.R": {
       "checksum": "38619723e8b8ab15564f91f8f4aef2c6"
     },
     "tests/testthat/test-tab-polish.R": {
-      "checksum": "da4fca7c2042c3aea1e2c15c247e7ec2"
+      "checksum": "2b33e059f72ecb7731bb5ebbe092a50a"
     },
     "tests/testthat/test-time-windows.R": {
-      "checksum": "1e63418b4fa94b9597c1de2491d37fb0"
+      "checksum": "8be293bca42fb38fcf86f161eefcdf6a"
     },
     "tests/testthat/test-upload-preview.R": {
       "checksum": "876f14dab287caf7e4001bcc2263c2fe"
     },
     "www/cgm-theme.css": {
-      "checksum": "091d2395bd609ccffbf55eca45300294"
+      "checksum": "bad8ed0900293799c410e41b09e709da"
     }
   },
   "users": null

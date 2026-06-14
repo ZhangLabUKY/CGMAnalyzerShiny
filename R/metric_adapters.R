@@ -128,13 +128,60 @@ adapter_group_values <- function(x, group_columns) {
   x[1L, group_columns, drop = FALSE]
 }
 
-#' Compute selected CGManalyzer-backed metrics
+internal_optional_metric_values <- function(glucose, interval_minutes = NA_real_) {
+  metric_names <- c("conga_12h", "conga_24h", "modd", "lbgi", "hbgi", "j_index", "mage")
+  empty <- stats::setNames(as.list(rep(NA_real_, length(metric_names))), metric_names)
+  values <- tryCatch(
+    optional_metrics_cpp(as.numeric(glucose), as.numeric(interval_minutes %||% NA_real_)[[1L]]),
+    error = function(error) NULL
+  )
+  if (is.null(values)) {
+    return(empty)
+  }
+  for (name in metric_names) {
+    value <- suppressWarnings(as.numeric(values[[name]]))
+    empty[[name]] <- if (length(value)) value[[1L]] else NA_real_
+  }
+  empty
+}
+
+internal_lag_metric_values <- function(timestamp, glucose, interval_minutes = NA_real_) {
+  metric_names <- c("conga_12h", "conga_24h", "modd")
+  empty <- stats::setNames(as.list(rep(NA_real_, length(metric_names))), metric_names)
+  timestamp_numeric <- as.numeric(timestamp)
+  interval_seconds <- as.numeric(interval_minutes %||% NA_real_) * 60
+  finite_times <- sort(timestamp_numeric[is.finite(timestamp_numeric)])
+  regular_series <- FALSE
+  if (is.finite(interval_seconds) && interval_seconds > 0 && length(finite_times) >= 2L) {
+    diffs <- diff(finite_times)
+    diffs <- diffs[is.finite(diffs) & diffs > 0]
+    regular_series <- length(diffs) > 0L &&
+      max(abs(diffs - interval_seconds), na.rm = TRUE) <= max(1, interval_seconds * 1e-6)
+  }
+  tolerance_seconds <- if (isTRUE(regular_series)) 0 else NA_real_
+  values <- tryCatch(
+    optional_lag_metrics_by_time_cpp(timestamp_numeric, as.numeric(glucose), tolerance_seconds),
+    error = function(error) NULL
+  )
+  if (is.null(values)) {
+    return(empty)
+  }
+  for (name in metric_names) {
+    value <- suppressWarnings(as.numeric(values[[name]]))
+    empty[[name]] <- if (length(value)) value[[1L]] else NA_real_
+  }
+  empty
+}
+
+#' Compute selected internal lag metrics
 #'
 #' @param data Standardized CGM data.
 #' @param by Grouping columns.
-#' @param max_gap_intervals Maximum gap to interpolate during regularization.
+#' @param max_gap_intervals Compatibility argument retained for callers that
+#'   previously controlled regularization. Optional lag metrics now use observed
+#'   timestamp pairs from the current analysis data without expanding a grid.
 #'
-#' @return A data frame with CGManalyzer metric columns.
+#' @return A data frame with optional lag metric columns.
 #' @noRd
 compute_cgmanalyzer_metrics <- function(
   data,
@@ -147,45 +194,20 @@ compute_cgmanalyzer_metrics <- function(
   }
 
   split_data <- split_by_columns(data, by)
-  installed <- requireNamespace("CGManalyzer", quietly = TRUE)
 
   out <- do.call(rbind, lapply(split_data, function(x) {
     group_values <- adapter_group_values(x, by)
-    if (!installed) {
-      return(data.frame(
-        group_values,
-        conga_12h = NA_real_,
-        conga_24h = NA_real_,
-        modd = NA_real_,
-        cgmanalyzer_status = "not_installed",
-        stringsAsFactors = FALSE,
-        check.names = FALSE
-      ))
-    }
-
-    regular <- regularize_cgm_series(x, max_gap_intervals = max_gap_intervals)
-    interval <- attr(regular, "interval_minutes")
-    y <- regular$glucose
-    conga_value <- function(hours) {
-      enough_conga <- !is.na(interval) && sum(!is.na(y)) > (60 / interval * hours)
-      if (enough_conga) {
-        safe_adapter_number(CGManalyzer::CONGA.fn(y, Interval = interval, n = hours))
-      } else {
-        NA_real_
-      }
-    }
-    enough_modd <- !is.na(interval) && length(y) >= (2 * 24 * 60 / interval)
+    y <- x[!is.na(x$timestamp) & !is.na(x$glucose), c("timestamp", "glucose"), drop = FALSE]
+    y <- y[order(y$timestamp), , drop = FALSE]
+    interval <- median_sampling_interval(y$timestamp)
+    metrics <- internal_lag_metric_values(y$timestamp, y$glucose, interval)
 
     data.frame(
       group_values,
-      conga_12h = conga_value(12),
-      conga_24h = conga_value(24),
-      modd = if (enough_modd) {
-        safe_adapter_number(CGManalyzer::MODD.fn(y, Interval = interval / 60))
-      } else {
-        NA_real_
-      },
-      cgmanalyzer_status = if (!is.na(interval)) "ok" else "insufficient_data",
+      conga_12h = metrics$conga_12h,
+      conga_24h = metrics$conga_24h,
+      modd = metrics$modd,
+      cgmanalyzer_status = if (!is.na(interval) && any(is.finite(y$glucose))) "internal_observed_pairs" else "insufficient_data",
       stringsAsFactors = FALSE,
       check.names = FALSE
     )
@@ -208,50 +230,23 @@ compute_iglu_metrics <- function(data, by = default_metric_groups(data)) {
     by <- "id"
   }
 
-  installed <- requireNamespace("iglu", quietly = TRUE)
-  group_map <- unique(data[, by, drop = FALSE])
-  group_map$.adapter_group <- do.call(paste, c(group_map[by], sep = "\r"))
-
-  if (!installed) {
+  split_data <- split_by_columns(data, by)
+  out <- do.call(rbind, lapply(split_data, function(x) {
+    group_values <- adapter_group_values(x, by)
+    y <- x[!is.na(x$timestamp) & !is.na(x$glucose), c("timestamp", "glucose"), drop = FALSE]
+    y <- y[order(y$timestamp), , drop = FALSE]
+    metrics <- internal_optional_metric_values(y$glucose, NA_real_)
     return(data.frame(
-      group_map[, by, drop = FALSE],
-      lbgi = NA_real_,
-      hbgi = NA_real_,
-      j_index = NA_real_,
-      mage = NA_real_,
-      iglu_status = "not_installed",
+      group_values,
+      lbgi = metrics$lbgi,
+      hbgi = metrics$hbgi,
+      j_index = metrics$j_index,
+      mage = metrics$mage,
+      iglu_status = if (any(is.finite(y$glucose))) "internal" else "insufficient_data",
       stringsAsFactors = FALSE,
       check.names = FALSE
     ))
-  }
-
-  lookup <- group_map[, c(by, ".adapter_group"), drop = FALSE]
-  data_with_group <- as.data.frame(
-    data.table::as.data.table(lookup)[
-      data.table::as.data.table(data),
-      on = by
-    ],
-    stringsAsFactors = FALSE
-  )
-  iglu_data <- data.frame(
-    id = as.character(data_with_group$.adapter_group),
-    time = data_with_group$timestamp,
-    gl = as.numeric(data_with_group$glucose),
-    stringsAsFactors = FALSE
-  )
-  iglu_data <- iglu_data[!is.na(iglu_data$id) & !is.na(iglu_data$time) & !is.na(iglu_data$gl), , drop = FALSE]
-
-  out <- group_map
-  out <- merge_iglu_metric(out, extract_iglu_metric_table(try(iglu::lbgi(iglu_data), silent = TRUE), "LBGI", "lbgi"))
-  out <- merge_iglu_metric(out, extract_iglu_metric_table(try(iglu::hbgi(iglu_data), silent = TRUE), "HBGI", "hbgi"))
-  out <- merge_iglu_metric(out, extract_iglu_metric_table(try(iglu::j_index(iglu_data), silent = TRUE), "J_index", "j_index"))
-  out <- merge_iglu_metric(out, extract_iglu_metric_table(
-    try(suppressWarnings(iglu::mage(iglu_data)), silent = TRUE),
-    "MAGE",
-    "mage"
-  ))
-  out$iglu_status <- if (nrow(iglu_data)) "ok" else "insufficient_data"
-  out$.adapter_group <- NULL
+  }))
   row.names(out) <- NULL
   out
 }

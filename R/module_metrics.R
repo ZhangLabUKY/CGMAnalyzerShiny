@@ -72,28 +72,97 @@ metrics_store_set <- function(store, id, entry) {
   invisible(entry)
 }
 
+metrics_entry_replace_fields <- function(existing, values, id) {
+  entry <- existing %||% list(id = id, status = "pending")
+  for (name in names(values)) {
+    entry[[name]] <- values[[name]]
+  }
+  entry$id <- id
+  entry
+}
+
 metrics_make_store <- function(key, ids, selected = "") {
   list(
     key = key,
     ids = ids,
     entries = new.env(parent = emptyenv()),
-    queue = subject_queue_new(ids, selected, subject_background_batch_size("metrics")),
-    adapter_running = character(),
-    worker_tokens = integer()
+    running = character()
   )
 }
 
+metrics_store_base_complete <- function(store) {
+  if (is.null(store)) {
+    return(FALSE)
+  }
+  setequal(metrics_store_cached_ids(store), clean_filter_values(store$ids))
+}
+
+metrics_store_queue_adapter_ids <- function(store, ids, selected = "") {
+  store
+}
+
+metrics_store_cached_ids <- function(store) {
+  ids <- clean_filter_values(metrics_store_ids(store))
+  ids[vapply(ids, function(id) {
+    entry <- metrics_store_get(store, id)
+    identical(entry$status %||% "", "base_ready") || identical(entry$status %||% "", "no_analysis_rows")
+  }, logical(1))]
+}
+
 metrics_progress_text <- function(store) {
-  if (is.null(store) || is.null(store$queue)) {
+  if (is.null(store)) {
     return("")
   }
-  subject_queue_progress_text("Metrics", store$queue, store$ids)
+  total <- length(clean_filter_values(store$ids))
+  if (!total) {
+    return("")
+  }
+  cached <- length(metrics_store_cached_ids(store))
+  if (cached >= total) {
+    return(sprintf("Metrics cached for all %s Subject IDs.", format(total, big.mark = ",")))
+  }
+  sprintf(
+    "Metrics cached for %s of %s Subject IDs. Select a Subject ID to calculate and cache it.",
+    format(cached, big.mark = ","),
+    format(total, big.mark = ",")
+  )
 }
 
 metrics_compute_base_batch <- function(data, ids, thresholds) {
+  ids <- clean_filter_values(ids)
+  batch_data <- data[as.character(data$id) %in% ids, , drop = FALSE]
+  combined_base <- if (nrow(batch_data) && valid_metric_thresholds(thresholds)) {
+    tryCatch(
+      compute_base_core_metrics(batch_data, thresholds = thresholds, by = default_metric_groups(batch_data)),
+      error = function(error) error
+    )
+  } else {
+    data.frame()
+  }
   rows <- lapply(ids, function(id) {
-    subject_data <- data[as.character(data$id) == id, , drop = FALSE]
-    list(id = id, base_state = compute_base_metric_state(subject_data, thresholds = thresholds))
+    subject_data <- batch_data[as.character(batch_data$id) == id, , drop = FALSE]
+    if (!nrow(subject_data)) {
+      return(list(id = id, base_state = compute_base_metric_state(subject_data, thresholds = thresholds)))
+    }
+    if (!valid_metric_thresholds(thresholds)) {
+      return(list(id = id, base_state = metric_state("base_error", data = subject_data, error = "Invalid metric threshold settings.")))
+    }
+    if (inherits(combined_base, "error")) {
+      return(list(id = id, base_state = metric_state("base_error", data = subject_data, error = conditionMessage(combined_base))))
+    }
+    subject_base <- if (is.data.frame(combined_base) && nrow(combined_base) && "id" %in% names(combined_base)) {
+      combined_base[as.character(combined_base$id) == id, , drop = FALSE]
+    } else {
+      data.frame()
+    }
+    row.names(subject_base) <- NULL
+    display <- prepare_metrics_display(subject_base, thresholds = thresholds)
+    state <- if (nrow(subject_base) && nrow(display)) {
+      metric_state("base_ready", data = subject_data, base = subject_base, display = display)
+    } else {
+      metric_state("no_analysis_rows", data = subject_data, base = subject_base, display = display)
+    }
+    list(id = id, base_state = state)
   })
   stats::setNames(rows, ids)
 }
@@ -106,16 +175,41 @@ metrics_compute_adapter_batch <- function(data, ids) {
   compute_metric_adapters(batch_data, by = default_metric_groups(batch_data))
 }
 
-metrics_aggregate_entries <- function(store, ids = NULL) {
-  ids <- ids %||% metrics_store_ids(store)
-  rows <- lapply(ids, function(id) metrics_entry_raw(metrics_store_get(store, id)))
-  rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
-  if (!length(rows)) {
-    return(data.frame())
+metrics_compute_subject <- function(data, id, thresholds) {
+  id <- normalize_filter_value(id)
+  if (!nzchar(id)) {
+    return(list(id = id, status = "idle"))
   }
-  out <- do.call(rbind, rows)
-  row.names(out) <- NULL
-  out
+  subject_data <- data[as.character(data$id) == id, , drop = FALSE]
+  base_state <- compute_base_metric_state(subject_data, thresholds = thresholds)
+  adapters <- data.frame()
+  adapter_status <- "idle"
+  adapter_error <- NULL
+  if (should_start_additional_metrics(base_state)) {
+    adapters <- tryCatch(
+      cgm_suppress_non_cgma_messages(metrics_compute_adapter_batch(subject_data, id)),
+      error = function(error) {
+        adapter_error <<- conditionMessage(error)
+        data.frame()
+      }
+    )
+    adapter_status <- if (is.data.frame(adapters) && nrow(adapters)) "complete" else "failed"
+  }
+  list(
+    id = id,
+    status = base_state$status,
+    base_state = base_state,
+    adapters = adapters,
+    adapter_status = adapter_status,
+    adapter_error = adapter_error,
+    computed_at = Sys.time()
+  )
+}
+
+metrics_aggregate_entries <- function(store, ids = NULL) {
+  ids <- ids %||% metrics_store_cached_ids(store)
+  rows <- lapply(ids, function(id) metrics_entry_raw(metrics_store_get(store, id)))
+  bind_metric_rows(rows)
 }
 
 metrics_module_server <- function(id, standardized, settings, active_tab = NULL) {
@@ -143,12 +237,9 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
     })
 
     metrics_key <- shiny::reactive({
-      paste(
-        utils::capture.output(utils::str(list(
-          data = cgm_data_signature(all_metric_data()),
-          thresholds = threshold_signature(settings()$thresholds_mg_dl)
-        ))),
-        collapse = "\n"
+      cgm_cache_key(
+        cgm_data_signature(all_metric_data()),
+        threshold_signature(settings()$thresholds_mg_dl)
       )
     })
 
@@ -163,189 +254,75 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
       store_state$store
     }
 
-    selected_entry_status <- function() {
-      selected <- selected_participant()
-      store <- store_state$store
-      if (identical(selected, all_filter_value())) {
-        return("all")
-      }
-      entry <- metrics_store_get(store, selected)
-      entry$status %||% "pending"
-    }
-
-    should_update_display_for_ids <- function(ids) {
-      selected <- selected_participant()
-      identical(selected, all_filter_value()) || selected %in% ids
-    }
-
     update_metric_entry <- function(id, values) {
       store <- store_state$store
       existing <- metrics_store_get(store, id) %||% list(id = id, status = "pending")
-      entry <- utils::modifyList(existing, values)
-      entry$id <- id
+      entry <- metrics_entry_replace_fields(existing, values, id)
       metrics_store_set(store, id, entry)
       invisible(entry)
     }
 
-    run_metric_adapter_batch <- function(data, ids, key) {
-      ids <- clean_filter_values(ids)
-      if (!length(ids)) {
+    ensure_metric_subject <- function(subject = selected_participant()) {
+      subject <- normalize_filter_value(subject)
+      if (!nzchar(subject)) {
         return(NULL)
       }
-      store_state$store$adapter_running <- unique(c(store_state$store$adapter_running, ids))
-      bump_progress()
-      worker_token <- configure_background_workers()
-      store_state$store$worker_tokens <- unique(c(store_state$store$worker_tokens, worker_token))
-      promise <- promises::future_promise({
-        cgm_timed(
-          "metrics_adapter_background",
-          metrics_compute_adapter_batch(data, ids),
-          context = list(subjects = length(ids))
-        )
-      })
-      promises::then(
-        promise,
-        onFulfilled = function(value) {
-          if (is.null(store_state$store) || !identical(store_state$store$key, key)) {
-            schedule_background_worker_cleanup(worker_token)
-            return(NULL)
-          }
-          for (subject_id in ids) {
-            adapter_rows <- if (is.data.frame(value) && nrow(value) && "id" %in% names(value)) {
-              value[as.character(value$id) == subject_id, , drop = FALSE]
-            } else {
-              data.frame()
-            }
-            update_metric_entry(subject_id, list(
-              adapters = adapter_rows,
-              adapter_status = if (nrow(adapter_rows)) "complete" else "failed"
-            ))
-          }
-          store_state$store$adapter_running <- setdiff(store_state$store$adapter_running, ids)
-          bump_progress()
-          if (should_update_display_for_ids(ids)) {
-            bump_display()
-          }
-          schedule_background_worker_cleanup(worker_token)
-          NULL
-        },
-        onRejected = function(error) {
-          if (!is.null(store_state$store) && identical(store_state$store$key, key)) {
-            for (subject_id in ids) {
-              update_metric_entry(subject_id, list(
-                adapters = NULL,
-                adapter_status = "failed",
-                adapter_error = conditionMessage(error)
-              ))
-            }
-            store_state$store$adapter_running <- setdiff(store_state$store$adapter_running, ids)
-            bump_progress()
-            if (should_update_display_for_ids(ids)) {
-              bump_display()
-            }
-          }
-          schedule_background_worker_cleanup(worker_token)
-          NULL
-        }
-      )
-      NULL
-    }
-
-    run_next_metric_batch <- function() {
       store <- ensure_metrics_store()
-      if (isTRUE(store$queue$running)) {
+      if (subject %in% store$running) {
         return(NULL)
       }
-      ids <- subject_queue_next_batch(store$queue)
-      if (!length(ids)) {
-        return(NULL)
+      entry <- metrics_store_get(store, subject)
+      if (!is.null(entry) && (entry$status %||% "") %in% c("base_ready", "no_analysis_rows", "base_error") && (entry$adapter_status %||% "idle") %in% c("complete", "failed", "idle")) {
+        return(entry)
       }
-      data <- all_metric_data()
-      thresholds <- settings()$thresholds_mg_dl
-      key <- store$key
-      store$queue <- subject_queue_mark_running(store$queue, TRUE)
+      store$running <- unique(c(store$running %||% character(), subject))
       store_state$store <- store
       bump_progress()
-      worker_token <- configure_background_workers()
-      store_state$store$worker_tokens <- unique(c(store_state$store$worker_tokens, worker_token))
-      promise <- promises::future_promise({
+      update_metric_entry(subject, list(
+        status = "running",
+        base_state = metrics_calculating_state(
+          filter_data_by_subject_selection(all_metric_data(), subject),
+          "Metrics are calculating for the selected Subject ID."
+        ),
+        adapter_status = "pending"
+      ))
+      bump_display()
+      key <- store$key
+      result <- tryCatch(
         cgm_timed(
-          "metrics_base_batch_background",
-          metrics_compute_base_batch(data, ids, thresholds),
-          context = list(subjects = length(ids))
+          "metrics_selected_subject_compute",
+          metrics_compute_subject(all_metric_data(), subject, settings()$thresholds_mg_dl),
+          context = list(subject = subject)
+        ),
+        error = function(error) list(
+          id = subject,
+          status = "base_error",
+          base_state = metric_state("base_error", error = conditionMessage(error)),
+          adapters = NULL,
+          adapter_status = "failed",
+          adapter_error = conditionMessage(error)
         )
-      })
-      promises::then(
-        promise,
-        onFulfilled = function(value) {
-          if (is.null(store_state$store) || !identical(store_state$store$key, key)) {
-            schedule_background_worker_cleanup(worker_token)
-            return(NULL)
-          }
-          failed <- character()
-          adapter_ids <- character()
-          for (subject_id in names(value)) {
-            base_state <- value[[subject_id]]$base_state
-            if (!identical(base_state$status, "base_ready")) {
-              failed <- c(failed, subject_id)
-            } else if (should_start_additional_metrics(base_state)) {
-              adapter_ids <- c(adapter_ids, subject_id)
-            }
-            update_metric_entry(subject_id, list(
-              status = base_state$status,
-              base_state = base_state,
-              adapter_status = if (subject_id %in% adapter_ids) "running" else "idle"
-            ))
-          }
-          store_state$store$queue <- subject_queue_mark_finished(store_state$store$queue, ids, failed = failed)
-          bump_progress()
-          if (should_update_display_for_ids(ids)) {
-            bump_display()
-          }
-          if (length(adapter_ids)) {
-            run_metric_adapter_batch(data, adapter_ids, key)
-          }
-          schedule_background_worker_cleanup(worker_token)
-          run_next_metric_batch()
-          NULL
-        },
-        onRejected = function(error) {
-          if (!is.null(store_state$store) && identical(store_state$store$key, key)) {
-            for (subject_id in ids) {
-              update_metric_entry(subject_id, list(
-                status = "base_error",
-                base_state = metric_state("base_error", error = conditionMessage(error)),
-                adapter_status = "failed"
-              ))
-            }
-            store_state$store$queue <- subject_queue_mark_finished(store_state$store$queue, ids, failed = ids)
-            bump_progress()
-            if (should_update_display_for_ids(ids)) {
-              bump_display()
-            }
-          }
-          schedule_background_worker_cleanup(worker_token)
-          run_next_metric_batch()
-          NULL
-        }
       )
+      if (!is.null(store_state$store) && identical(store_state$store$key, key)) {
+        update_metric_entry(subject, result)
+        store_state$store$running <- setdiff(store_state$store$running %||% character(), subject)
+        bump_progress()
+        bump_display()
+      }
       NULL
     }
 
     shiny::observe({
       req_active_tab(active_tab, "metrics")
       ensure_metrics_store()
-      run_next_metric_batch()
+      ensure_metric_subject()
       NULL
     })
 
     shiny::observeEvent(input$participant, {
       req_active_tab(active_tab, "metrics")
-      store <- ensure_metrics_store()
-      store$queue <- subject_queue_reprioritize(store$queue, input$participant)
-      store_state$store <- store
+      ensure_metric_subject(input$participant)
       bump_progress()
-      run_next_metric_batch()
       bump_display()
       NULL
     }, ignoreInit = TRUE)
@@ -361,7 +338,7 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
       if (identical(selected, all_filter_value())) {
         raw_metrics <- metrics_aggregate_entries(store)
         if (!nrow(raw_metrics)) {
-          return(metrics_calculating_state(all_metric_data(), "Metrics are calculating. Completed Subject IDs will appear here as batches finish."))
+          return(metrics_calculating_state(all_metric_data(), "Select a Subject ID to calculate and cache Metrics. Cached Subject IDs will appear in All."))
         }
       } else {
         entry <- metrics_store_get(store, selected)
@@ -461,7 +438,11 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
       selected <- selected_participant()
       adapter_status <- if (identical(selected, all_filter_value())) {
         store <- store_state$store
-        if (!is.null(store) && length(store$adapter_running)) "running" else "complete"
+        cached <- if (!is.null(store)) metrics_store_cached_ids(store) else character()
+        statuses <- vapply(cached, function(subject_id) {
+          (metrics_store_get(store, subject_id) %||% list())$adapter_status %||% "idle"
+        }, character(1))
+        if (any(statuses == "failed")) "failed" else "complete"
       } else {
         (metrics_store_get(store_state$store, selected) %||% list())$adapter_status %||% "idle"
       }
@@ -531,7 +512,7 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
     })
 
     output$metrics_table <- DT::renderDT({
-      display <- filtered_display()
+      display <- metrics_display_table_frame(filtered_display())
       cgm_timed(
         "metrics_table_dt_render",
         DT::datatable(
@@ -542,23 +523,23 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
         ),
         rows = nrow(display)
       )
-    })
+    }, server = TRUE)
 
     metrics <- shiny::reactive({
-      if (is_active_tab(active_tab, "metrics")) {
-        display_version()
-        selected <- selected_participant()
-        store <- ensure_metrics_store()
-        if (identical(selected, all_filter_value())) {
-          return(metrics_aggregate_entries(store))
+      display_version()
+      store <- store_state$store
+      if (is.null(store)) {
+        if (is_active_tab(active_tab, "metrics")) {
+          store <- ensure_metrics_store()
+        } else {
+          return(data.frame())
         }
-        return(metrics_entry_raw(metrics_store_get(store, selected)))
       }
-      data <- standardized()
-      cgm_timed(
-        "metrics_sync_all",
-        compute_core_metrics(data, thresholds = settings()$thresholds_mg_dl)
-      )
+      selected <- if (is_active_tab(active_tab, "metrics")) selected_participant() else all_filter_value()
+      if (identical(selected, all_filter_value())) {
+        return(metrics_aggregate_entries(store))
+      }
+      metrics_entry_raw(metrics_store_get(store, selected))
     })
 
     metrics

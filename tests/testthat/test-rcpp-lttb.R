@@ -29,7 +29,7 @@ test_that("Rcpp LTTB errors on mismatched x and y lengths", {
 })
 
 test_that("DESCRIPTION does not import unavailable lttb package", {
-  description <- utils::packageDescription("CGMAnalyzerShiny")
+  description <- utils::packageDescription("CGManalyzer2")
   imports <- if (is.null(description$Imports)) "" else description$Imports
 
   expect_false(grepl("\\blttb\\b", imports))

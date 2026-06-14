@@ -1,4 +1,4 @@
 library(testthat)
-library(CGMAnalyzerShiny)
+library(CGManalyzer2)
 
-test_check("CGMAnalyzerShiny")
+test_check("CGManalyzer2")

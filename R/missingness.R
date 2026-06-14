@@ -295,7 +295,7 @@ fast_missingness_grid_summary_by_id <- function(data, interval_minutes = 5L) {
 
   finite_summary <- empty_missingness_grid_summary()
   if (any(finite)) {
-    finite_dt <- data.table::copy(dt[finite])
+    finite_dt <- dt[finite]
     data.table::setorder(finite_dt, id, timestamp, .original_order)
     finite_dt[, .anchor_timestamp := min(timestamp, na.rm = TRUE), by = id]
     finite_dt[, timestamp := .anchor_timestamp +

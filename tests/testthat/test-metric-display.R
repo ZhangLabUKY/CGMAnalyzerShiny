@@ -188,6 +188,24 @@ test_that("metrics table options group by Category", {
   display <- empty_metrics_display()
   options <- metrics_table_options(display)
 
+  expect_false("rowGroup" %in% names(options))
+  expect_equal(options$pageLength, 15)
+
+  display <- rbind(
+    display,
+    data.frame(
+      `Subject ID` = "A",
+      Period = "All",
+      Category = "Central Tendency",
+      Metric = "Mean glucose",
+      Definition = "Mean glucose.",
+      Value = 100,
+      Units = "mg/dL",
+      check.names = FALSE
+    )
+  )
+  options <- metrics_table_options(display)
+
   expect_true("rowGroup" %in% names(options))
   expect_equal(options$rowGroup$dataSrc, match("Category", names(display)) - 1L)
   expect_equal(
@@ -196,6 +214,24 @@ test_that("metrics table options group by Category", {
   )
   expect_false(options$columnDefs[[1]]$visible)
   expect_equal(options$pageLength, 15)
+})
+
+test_that("metrics display table frame keeps stable DataTables columns", {
+  display <- data.frame(
+    Category = "Central Tendency",
+    Metric = "Mean glucose",
+    Definition = "Mean glucose.",
+    Value = 100,
+    Units = "mg/dL",
+    stringsAsFactors = FALSE
+  )
+
+  table <- metrics_display_table_frame(display)
+
+  expect_named(table, c("Subject ID", "Group", "Period", "Category", "Metric", "Definition", "Value", "Units"))
+  expect_equal(table[["Subject ID"]], "")
+  expect_equal(table$Group, "")
+  expect_equal(table$Period, "")
 })
 
 test_that("optional metric note is user-facing and hides internal wording", {

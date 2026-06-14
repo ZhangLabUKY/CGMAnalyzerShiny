@@ -1,4 +1,4 @@
-Package: CGMAnalyzerShiny
+Package: CGManalyzer2
 Title: Shiny Application for Continuous Glucose Monitoring Analysis
 Version: 0.0.0.9000
 Authors@R: c(
@@ -19,9 +19,7 @@ Depends:
 Imports:
     bslib,
     data.table,
-    CGManalyzer,
     CGMissingDataR (>= 0.0.2),
-    iglu,
     DT,
     future,
     fasttime,
@@ -30,7 +28,6 @@ Imports:
     lubridate,
     plotly,
     pracma,
-    promises,
     Rcpp,
     readr,
     readxl,
@@ -43,6 +40,9 @@ Imports:
 LinkingTo:
     Rcpp
 Suggests:
+    CGManalyzer,
+    iglu,
+    promises,
     testthat (>= 3.0.0),
     spelling, 
     knitr, 

@@ -100,12 +100,13 @@ stats_module_server <- function(id, metrics, active_tab = NULL) {
     })
 
     statistics_metrics <- shiny::reactive({
+      req_active_tab(active_tab, "statistics")
       filter_metrics_by_period(metrics(), selected_period())
     })
 
     output$period_filter <- shiny::renderUI({
       req_active_tab(active_tab, "statistics")
-      data <- metrics()
+      data <- statistics_metrics()
       if (!is.data.frame(data) || !"metric_period" %in% names(data)) {
         return(NULL)
       }
@@ -118,7 +119,7 @@ stats_module_server <- function(id, metrics, active_tab = NULL) {
       )
     })
 
-    shiny::observeEvent(list(metrics(), selected_period()), {
+    shiny::observe({
       req_active_tab(active_tab, "statistics")
       current_metrics <- statistics_metrics()
       metric_choices <- metric_test_choices(current_metrics)
@@ -144,7 +145,7 @@ stats_module_server <- function(id, metrics, active_tab = NULL) {
           character()
         }
       )
-    }, ignoreInit = FALSE)
+    })
 
     selected_test_result <- shiny::reactive({
       metric <- input$metric
@@ -158,7 +159,7 @@ stats_module_server <- function(id, metrics, active_tab = NULL) {
         ))
       }
       run_metric_stat_test(
-        metrics(),
+        statistics_metrics(),
         metric = metric,
         grouping = grouping,
         test_type = input$test_type,
@@ -191,7 +192,7 @@ stats_module_server <- function(id, metrics, active_tab = NULL) {
       summary <- if (is.null(metric) || !nzchar(metric) || is.null(grouping) || !nzchar(grouping)) {
         summarize_metric_by_group(data.frame(), metric %||% "", grouping %||% "")
       } else {
-        summarize_metric_by_group(metrics(), metric = metric, grouping = grouping, period = selected_period())
+        summarize_metric_by_group(statistics_metrics(), metric = metric, grouping = grouping, period = selected_period())
       }
       DT::datatable(summary, rownames = FALSE, options = list(dom = "t", scrollX = FALSE))
     })
