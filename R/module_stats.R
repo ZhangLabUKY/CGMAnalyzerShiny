@@ -158,12 +158,17 @@ stats_module_server <- function(id, metrics, active_tab = NULL) {
           note = "Select a metric and grouping variable to run a test."
         ))
       }
-      run_metric_stat_test(
-        statistics_metrics(),
-        metric = metric,
-        grouping = grouping,
-        test_type = input$test_type,
-        period = selected_period()
+      cgm_with_progress(
+        "Running statistical test",
+        detail = "Testing the selected metric by group...",
+        value = 0.2,
+        run_metric_stat_test(
+          statistics_metrics(),
+          metric = metric,
+          grouping = grouping,
+          test_type = input$test_type,
+          period = selected_period()
+        )
       )
     })
 
@@ -192,7 +197,12 @@ stats_module_server <- function(id, metrics, active_tab = NULL) {
       summary <- if (is.null(metric) || !nzchar(metric) || is.null(grouping) || !nzchar(grouping)) {
         summarize_metric_by_group(data.frame(), metric %||% "", grouping %||% "")
       } else {
-        summarize_metric_by_group(statistics_metrics(), metric = metric, grouping = grouping, period = selected_period())
+        cgm_with_progress(
+          "Preparing group summary",
+          detail = "Summarizing the selected metric by group...",
+          value = 0.2,
+          summarize_metric_by_group(statistics_metrics(), metric = metric, grouping = grouping, period = selected_period())
+        )
       }
       DT::datatable(summary, rownames = FALSE, options = list(dom = "t", scrollX = FALSE))
     })

@@ -485,11 +485,16 @@ qc_module_server <- function(
 
     qc_summary <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, c("quality", "export"))
-      cgm_timed(
-        "quality_qc_summary",
-        compute_qc_summary(
-          analysis_data(),
-          valid_day_hours = settings()$valid_day_hours
+      cgm_with_progress(
+        "Preparing Quality summary",
+        detail = "Calculating QC checks...",
+        value = 0.2,
+        cgm_timed(
+          "quality_qc_summary",
+          compute_qc_summary(
+            analysis_data(),
+            valid_day_hours = settings()$valid_day_hours
+          )
         )
       )
     }),
@@ -504,14 +509,21 @@ qc_module_server <- function(
       shiny::bindCache(shiny::reactive({
         req_active_tab(active_tab, "quality")
         data <- standardized()
-        result <- cgm_timed(
-          "quality_standardized_missingness_precompute",
-          cgm_suppress_non_cgma_messages(
-            missingness_precompute(
-              data,
-              interval_minutes = settings()$imputation_interval_minutes %||% 5L
+        result <- cgm_with_progress(
+          "Preparing Quality baseline review",
+          detail = "Scanning original standardized data...",
+          value = 0.2,
+          {
+            cgm_timed(
+              "quality_standardized_missingness_precompute",
+              cgm_suppress_non_cgma_messages(
+                missingness_precompute(
+                  data,
+                  interval_minutes = settings()$imputation_interval_minutes %||% 5L
+                )
+              )
             )
-          )
+          }
         )
         cgm_maybe_gc(nrow(data))
         result
@@ -528,14 +540,21 @@ qc_module_server <- function(
       shiny::bindCache(shiny::reactive({
         req_active_tab(active_tab, "quality")
         data <- analysis_data()
-        result <- cgm_timed(
-          "quality_analysis_missingness_precompute",
-          cgm_suppress_non_cgma_messages(
-            missingness_precompute(
-              data,
-              interval_minutes = settings()$imputation_interval_minutes %||% 5L
+        result <- cgm_with_progress(
+          "Preparing Quality missingness review",
+          detail = "Scanning analysis data for timestamp gaps...",
+          value = 0.2,
+          {
+            cgm_timed(
+              "quality_analysis_missingness_precompute",
+              cgm_suppress_non_cgma_messages(
+                missingness_precompute(
+                  data,
+                  interval_minutes = settings()$imputation_interval_minutes %||% 5L
+                )
+              )
             )
-          )
+          }
         )
         cgm_maybe_gc(nrow(data))
         result
@@ -548,16 +567,21 @@ qc_module_server <- function(
 
     missingness_comparison <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "quality")
-      cgm_timed(
-        "quality_missingness_comparison",
-        compare_missingness_summaries(
-          standardized(),
-          analysis_data(),
-          valid_day_hours = settings()$valid_day_hours,
-          include_preprocessing = should_show_analysis_missingness(settings()),
-          interval_minutes = settings()$imputation_interval_minutes %||% 5L,
-          original_precomputed = standardized_missingness(),
-          analysis_precomputed = analysis_missingness()
+      cgm_with_progress(
+        "Preparing Missingness Summary",
+        detail = "Comparing original and analysis data...",
+        value = 0.2,
+        cgm_timed(
+          "quality_missingness_comparison",
+          compare_missingness_summaries(
+            standardized(),
+            analysis_data(),
+            valid_day_hours = settings()$valid_day_hours,
+            include_preprocessing = should_show_analysis_missingness(settings()),
+            interval_minutes = settings()$imputation_interval_minutes %||% 5L,
+            original_precomputed = standardized_missingness(),
+            analysis_precomputed = analysis_missingness()
+          )
         )
       )
     }),
@@ -571,11 +595,16 @@ qc_module_server <- function(
 
     study_window <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "quality")
-      cgm_timed(
-        "quality_study_window",
-        study_window_summary(
-          analysis_data(),
-          expected_duration_days = settings()$expected_study_duration_days
+      cgm_with_progress(
+        "Preparing study window",
+        detail = "Summarizing observed coverage...",
+        value = 0.2,
+        cgm_timed(
+          "quality_study_window",
+          study_window_summary(
+            analysis_data(),
+            expected_duration_days = settings()$expected_study_duration_days
+          )
         )
       )
     }),
@@ -586,14 +615,19 @@ qc_module_server <- function(
 
     imputation_status <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "quality")
-      cgm_timed(
-        "quality_imputation_status",
-        summarize_imputation_status(
-          standardized(),
-          analysis_data(),
-          settings(),
-          original_precomputed = standardized_missingness(),
-          analysis_precomputed = analysis_missingness()
+      cgm_with_progress(
+        "Preparing imputation status",
+        detail = "Summarizing preprocessing effects...",
+        value = 0.2,
+        cgm_timed(
+          "quality_imputation_status",
+          summarize_imputation_status(
+            standardized(),
+            analysis_data(),
+            settings(),
+            original_precomputed = standardized_missingness(),
+            analysis_precomputed = analysis_missingness()
+          )
         )
       )
     }),
@@ -605,12 +639,17 @@ qc_module_server <- function(
 
     gap_periods <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "quality")
-      cgm_timed(
-        "quality_gap_periods",
-        detect_gap_periods(
-          analysis_data(),
-          interval_minutes = settings()$imputation_interval_minutes %||% 5L,
-          precomputed = analysis_missingness()
+      cgm_with_progress(
+        "Preparing gap periods",
+        detail = "Finding timestamp-gap intervals...",
+        value = 0.2,
+        cgm_timed(
+          "quality_gap_periods",
+          detect_gap_periods(
+            analysis_data(),
+            interval_minutes = settings()$imputation_interval_minutes %||% 5L,
+            precomputed = analysis_missingness()
+          )
         )
       )
     }),
@@ -621,14 +660,19 @@ qc_module_server <- function(
 
     missingness_calendar_all <- shiny::bindCache(shiny::reactive({
       req_active_tab(active_tab, "quality")
-      cgm_timed(
-        "quality_daily_coverage_calendar_data",
-        compute_missingness_calendar_data(
-          analysis_data(),
-          gaps = gap_periods(),
-          date_range = settings()$analysis_date_range,
-          interval_minutes = settings()$imputation_interval_minutes %||% 5L,
-          precomputed = analysis_missingness()
+      cgm_with_progress(
+        "Preparing daily coverage",
+        detail = "Building participant-day coverage calendar...",
+        value = 0.2,
+        cgm_timed(
+          "quality_daily_coverage_calendar_data",
+          compute_missingness_calendar_data(
+            analysis_data(),
+            gaps = gap_periods(),
+            date_range = settings()$analysis_date_range,
+            interval_minutes = settings()$imputation_interval_minutes %||% 5L,
+            precomputed = analysis_missingness()
+          )
         )
       )
     }),

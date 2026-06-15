@@ -618,10 +618,16 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
           return(NULL)
         }
         value <- tryCatch(
-          cgm_timed(
-            "complexity_selected_advanced_deferred",
-            cgm_suppress_non_cgma_messages(complexity_compute_advanced_batch(data, subject_id, params)),
-            context = list(subject = subject_id)
+          cgm_with_progress(
+            "Calculating advanced Complexity",
+            detail = "Running Hurst, DFA/Higuchi, and MSE stages...",
+            value = 0.2,
+            session = session,
+            cgm_timed(
+              "complexity_selected_advanced_deferred",
+              cgm_suppress_non_cgma_messages(complexity_compute_advanced_batch(data, subject_id, params)),
+              context = list(subject = subject_id)
+            )
           ),
           error = function(error) {
             mark_advanced_failed(error)
@@ -676,10 +682,15 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
       store_state$store <- store
       bump_progress()
       value <- tryCatch(
-        cgm_timed(
-          "complexity_selected_quick_compute",
-          complexity_compute_quick_batch(data, subject, params),
-          context = list(subject = subject)
+        cgm_with_progress(
+          "Calculating Complexity",
+          detail = "Preparing quick summary for the selected Subject ID...",
+          value = 0.2,
+          cgm_timed(
+            "complexity_selected_quick_compute",
+            complexity_compute_quick_batch(data, subject, params),
+            context = list(subject = subject)
+          )
         ),
         error = function(error) {
           failed <- compute_complexity_pending_summary(data, params, status = "failed")
@@ -1030,14 +1041,23 @@ complexity_module_server <- function(id, standardized, active_tab = NULL) {
         } else {
           character()
         }
-        out <- prepare_complexity_cached_export(
-          results,
-          displayed_complexity_curves(),
-          display_data(),
-          generated_ids,
-          show_subject_id = force_subject_id_display()
+        cgm_with_progress(
+          "Exporting Complexity CSV",
+          detail = "Preparing cached Complexity results...",
+          value = 0.1,
+          session = session,
+          {
+            out <- prepare_complexity_cached_export(
+              results,
+              displayed_complexity_curves(),
+              display_data(),
+              generated_ids,
+              show_subject_id = force_subject_id_display()
+            )
+            shiny::incProgress(0.6, detail = "Writing CSV...")
+            data.table::fwrite(out, file)
+          }
         )
-        data.table::fwrite(out, file)
       }
     )
 

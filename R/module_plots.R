@@ -201,17 +201,22 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
     plot_display_context <- shiny::reactive({
       req_active_tab(active_tab, "plots")
       plot_type <- input$plot_type %||% "trace"
-      filtered <- cgm_timed(
-        "plots_filter_data",
-        plot_filtered_data(
-          standardized(),
-          plot_type = plot_type,
-          participant = input$participant,
-          group = input$group,
-          day = normalized_day(),
-          time_window = normalized_time_window()
-        ),
-        context = list(plot_type = plot_type)
+      filtered <- cgm_with_progress(
+        "Preparing plot data",
+        detail = "Applying the current filters...",
+        value = 0.2,
+        cgm_timed(
+          "plots_filter_data",
+          plot_filtered_data(
+            standardized(),
+            plot_type = plot_type,
+            participant = input$participant,
+            group = input$group,
+            day = normalized_day(),
+            time_window = normalized_time_window()
+          ),
+          context = list(plot_type = plot_type)
+        )
       )
       if (identical(plot_type, "agp")) {
         return(list(
@@ -278,50 +283,70 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
       plot_type <- input$plot_type %||% "trace"
       display_context <- plot_display_context()
       if (identical(plot_type, "daily_overlay")) {
-        return(cgm_timed(
-          "plots_create_daily_overlay",
-          create_daily_overlay_plot(
-            standardized(),
-            thresholds = thresholds,
-            participant = input$participant,
-            group = input$group,
-            day = normalized_day(),
-            time_window = normalized_time_window(),
-            max_points_per_participant = display_context$max_points_per_participant
+        return(cgm_with_progress(
+          "Preparing plot",
+          detail = "Building daily overlay...",
+          value = 0.2,
+          cgm_timed(
+            "plots_create_daily_overlay",
+            create_daily_overlay_plot(
+              standardized(),
+              thresholds = thresholds,
+              participant = input$participant,
+              group = input$group,
+              day = normalized_day(),
+              time_window = normalized_time_window(),
+              max_points_per_participant = display_context$max_points_per_participant
+            )
           )
         ))
       }
       if (identical(plot_type, "agp")) {
-        return(cgm_timed(
-          "plots_create_agp",
-          create_agp_summary_plot(
-            standardized(),
-            thresholds = thresholds,
-            participant = input$participant,
-            group = input$group,
-            time_window = normalized_time_window()
+        return(cgm_with_progress(
+          "Preparing plot",
+          detail = "Building AGP summary...",
+          value = 0.2,
+          cgm_timed(
+            "plots_create_agp",
+            create_agp_summary_plot(
+              standardized(),
+              thresholds = thresholds,
+              participant = input$participant,
+              group = input$group,
+              time_window = normalized_time_window()
+            )
           )
         ))
       }
 
-      data <- cgm_timed(
-        "plots_trace_filter",
-        filter_plot_data(
-          standardized(),
-          participant = input$participant,
-          group = input$group,
-          time_window = normalized_time_window()
+      data <- cgm_with_progress(
+        "Preparing plot",
+        detail = "Filtering trace data...",
+        value = 0.2,
+        cgm_timed(
+          "plots_trace_filter",
+          filter_plot_data(
+            standardized(),
+            participant = input$participant,
+            group = input$group,
+            time_window = normalized_time_window()
+          )
         )
       )
-      cgm_timed(
-        "plots_create_trace",
-        create_trace_plot(
-          data,
-          thresholds = thresholds,
-          time_window = normalized_time_window(),
-          max_points_per_participant = display_context$max_points_per_participant
-        ),
-        rows = nrow(data)
+      cgm_with_progress(
+        "Preparing plot",
+        detail = "Building trace plot...",
+        value = 0.5,
+        cgm_timed(
+          "plots_create_trace",
+          create_trace_plot(
+            data,
+            thresholds = thresholds,
+            time_window = normalized_time_window(),
+            max_points_per_participant = display_context$max_points_per_participant
+          ),
+          rows = nrow(data)
+        )
       )
     }),
     cgm_data_signature(standardized()),
@@ -340,33 +365,48 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
       thresholds <- settings()$thresholds_mg_dl
       display_context <- plot_display_context()
       if (identical(plot_type, "trace")) {
-        return(cgm_timed(
-          "plots_trace_native_plotly_render",
-          create_trace_plotly(
-            display_context$filtered,
-            thresholds = thresholds,
-            time_window = normalized_time_window(),
-            max_points_per_participant = display_context$max_points_per_participant
-          ),
-          rows = nrow(display_context$filtered)
+        return(cgm_with_progress(
+          "Rendering plot",
+          detail = "Drawing trace plot...",
+          value = 0.2,
+          cgm_timed(
+            "plots_trace_native_plotly_render",
+            create_trace_plotly(
+              display_context$filtered,
+              thresholds = thresholds,
+              time_window = normalized_time_window(),
+              max_points_per_participant = display_context$max_points_per_participant
+            ),
+            rows = nrow(display_context$filtered)
+          )
         ))
       }
       if (identical(plot_type, "daily_overlay")) {
-        return(cgm_timed(
-          "plots_daily_overlay_native_plotly_render",
-          create_daily_overlay_plotly(
-            standardized(),
-            thresholds = thresholds,
-            participant = input$participant,
-            group = input$group,
-            day = normalized_day(),
-            time_window = normalized_time_window(),
-            max_points_per_participant = display_context$max_points_per_participant
-          ),
-          rows = nrow(display_context$filtered)
+        return(cgm_with_progress(
+          "Rendering plot",
+          detail = "Drawing daily overlay...",
+          value = 0.2,
+          cgm_timed(
+            "plots_daily_overlay_native_plotly_render",
+            create_daily_overlay_plotly(
+              standardized(),
+              thresholds = thresholds,
+              participant = input$participant,
+              group = input$group,
+              day = normalized_day(),
+              time_window = normalized_time_window(),
+              max_points_per_participant = display_context$max_points_per_participant
+            ),
+            rows = nrow(display_context$filtered)
+          )
         ))
       }
-      plotly_plot <- cgm_timed("plots_ggplotly_render", plotly::ggplotly(active_plot(), tooltip = "text"))
+      plotly_plot <- cgm_with_progress(
+        "Rendering plot",
+        detail = "Drawing AGP summary...",
+        value = 0.2,
+        cgm_timed("plots_ggplotly_render", plotly::ggplotly(active_plot(), tooltip = "text"))
+      )
       if (identical(input$plot_type, "agp")) {
         plotly_plot <- cgm_timed("plots_agp_layout", layout_agp_plotly(plotly_plot))
       }
@@ -385,7 +425,17 @@ plots_module_server <- function(id, standardized, metrics, settings, active_tab 
         )
       },
       content = function(file) {
-        ggplot2::ggsave(file, plot = active_plot(), width = 10, height = 6, dpi = 300, bg = "white")
+        cgm_with_progress(
+          "Exporting plot",
+          detail = "Preparing PNG...",
+          value = 0.1,
+          session = session,
+          {
+            plot <- active_plot()
+            shiny::incProgress(0.6, detail = "Writing PNG...")
+            ggplot2::ggsave(file, plot = plot, width = 10, height = 6, dpi = 300, bg = "white")
+          }
+        )
       }
     )
 

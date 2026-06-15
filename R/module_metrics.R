@@ -289,10 +289,15 @@ metrics_module_server <- function(id, standardized, settings, active_tab = NULL)
       bump_display()
       key <- store$key
       result <- tryCatch(
-        cgm_timed(
-          "metrics_selected_subject_compute",
-          metrics_compute_subject(all_metric_data(), subject, settings()$thresholds_mg_dl),
-          context = list(subject = subject)
+        cgm_with_progress(
+          "Calculating Metrics",
+          detail = "Generating metrics for the selected Subject ID...",
+          value = 0.2,
+          cgm_timed(
+            "metrics_selected_subject_compute",
+            metrics_compute_subject(all_metric_data(), subject, settings()$thresholds_mg_dl),
+            context = list(subject = subject)
+          )
         ),
         error = function(error) list(
           id = subject,

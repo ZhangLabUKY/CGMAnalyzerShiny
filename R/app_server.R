@@ -111,8 +111,8 @@ app_server <- function(input, output, session) {
     map <- mapping()
     shiny::req(upload$data)
     shiny::req(map$timestamp, map$glucose)
-    shiny::withProgress(
-      message = "Preparing CGM data",
+    cgm_with_progress(
+      "Preparing CGM data",
       detail = "Reading selected columns...",
       value = 0,
       {
@@ -147,6 +147,7 @@ app_server <- function(input, output, session) {
 
   settings <- preprocessing_module_server("preprocessing", mapping, standardized, shared_missingness = shared_missingness)
   imputation_run <- attr(settings, "imputation_run", exact = TRUE) %||% shiny::reactive(0L)
+  imputation_status <- attr(settings, "imputation_status", exact = TRUE) %||% shiny::reactive(list(state = "not_run"))
   set_imputation_status <- attr(settings, "set_imputation_status", exact = TRUE) %||% function(status) invisible(NULL)
 
   safe_standardized <- shiny::reactive({
@@ -333,8 +334,8 @@ app_server <- function(input, output, session) {
       shared_missingness,
       review_key,
       function() {
-        shiny::withProgress(
-          message = "Reviewing timestamp gaps...",
+        cgm_with_progress(
+          "Reviewing timestamp gaps...",
           value = 0.4,
           compute_analysis_missingness_review(data, interval_minutes)
         )
@@ -403,22 +404,32 @@ app_server <- function(input, output, session) {
     }
 
     set_imputation_status(list(state = "running", message = imputation_status_message("running")))
-    interval_minutes <- current_settings$imputation_interval_minutes %||% 5L
-    precomputed <- tryCatch(
+    result <- cgm_with_progress(
+      "Running imputation",
+      detail = "Preparing missingness inputs...",
+      value = 0,
       {
-        value <- cgm_timed(
-          "analysis_data_imputation_precompute",
-          cgm_suppress_non_cgma_messages(
-            missingness_precompute(data, interval_minutes = interval_minutes)
-          ),
-          context = list(method = method)
+        interval_minutes <- current_settings$imputation_interval_minutes %||% 5L
+        precomputed <- tryCatch(
+          {
+            value <- cgm_timed(
+              "analysis_data_imputation_precompute",
+              cgm_suppress_non_cgma_messages(
+                missingness_precompute(data, interval_minutes = interval_minutes)
+              ),
+              context = list(method = method)
+            )
+            cgm_maybe_gc(nrow(data))
+            value
+          },
+          error = function(error) NULL
         )
-        cgm_maybe_gc(nrow(data))
-        value
-      },
-      error = function(error) NULL
+        shiny::incProgress(0.35, detail = "Applying selected imputation method...")
+        imputed <- attach_cgm_data_signature(apply_imputation_settings(data, current_settings, precomputed = precomputed))
+        shiny::incProgress(0.55, detail = "Finalizing imputed analysis data...")
+        imputed
+      }
     )
-    result <- attach_cgm_data_signature(apply_imputation_settings(data, current_settings, precomputed = precomputed))
     error_message <- attr(result, "imputation_error", exact = TRUE)
     if (!is.null(error_message) && nzchar(error_message)) {
       set_imputation_status(list(state = "failed", message = imputation_status_message("failed", error_message)))
@@ -462,14 +473,21 @@ app_server <- function(input, output, session) {
   shared_missingness$analysis_missingness_precompute <- shiny::bindCache(shiny::reactive({
     req_active_tab(active_tab, "quality")
     data <- analysis_data()
-    result <- cgm_timed(
-      "quality_analysis_missingness_precompute",
-      cgm_suppress_non_cgma_messages(
-        missingness_precompute(
-          data,
-          interval_minutes = settings()$imputation_interval_minutes %||% 5L
+    result <- cgm_with_progress(
+      "Preparing Quality missingness review",
+      detail = "Scanning analysis data for timestamp gaps...",
+      value = 0.2,
+      {
+        cgm_timed(
+          "quality_analysis_missingness_precompute",
+          cgm_suppress_non_cgma_messages(
+            missingness_precompute(
+              data,
+              interval_minutes = settings()$imputation_interval_minutes %||% 5L
+            )
+          )
         )
-      )
+      }
     )
     cgm_maybe_gc(nrow(data))
     result
@@ -488,14 +506,21 @@ app_server <- function(input, output, session) {
       return(shared_missingness$analysis_missingness_precompute())
     }
     data <- analysis_input()
-    result <- cgm_timed(
-      "quality_standardized_missingness_precompute",
-      cgm_suppress_non_cgma_messages(
-        missingness_precompute(
-          data,
-          interval_minutes = settings()$imputation_interval_minutes %||% 5L
+    result <- cgm_with_progress(
+      "Preparing Quality baseline review",
+      detail = "Scanning original standardized data...",
+      value = 0.2,
+      {
+        cgm_timed(
+          "quality_standardized_missingness_precompute",
+          cgm_suppress_non_cgma_messages(
+            missingness_precompute(
+              data,
+              interval_minutes = settings()$imputation_interval_minutes %||% 5L
+            )
+          )
         )
-      )
+      }
     )
     cgm_maybe_gc(nrow(data))
     result
@@ -521,5 +546,5 @@ app_server <- function(input, output, session) {
   plots_module_server("plots", analysis_data, metrics, settings, active_tab)
   stats_module_server("stats", metrics, active_tab)
   complexity_module_server("complexity", analysis_data, active_tab)
-  export_module_server("export", standardized, analysis_data, metrics, qc_summary, settings)
+  export_module_server("export", analysis_data, settings, imputation_status)
 }

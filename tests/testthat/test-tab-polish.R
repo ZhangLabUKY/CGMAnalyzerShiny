@@ -459,6 +459,28 @@ test_that("plots module UI renders dashboard visual section without tabsets", {
   expect_false(grepl("nav-tabs", html, fixed = TRUE))
 })
 
+test_that("export module UI renders polished result downloads", {
+  html <- paste(as.character(export_module_ui("export")), collapse = "\n")
+
+  expect_true(grepl("cgm-export-dashboard", html, fixed = TRUE))
+  expect_true(grepl("export-analysis_download_ui", html, fixed = TRUE))
+  expect_true(grepl("export-download_metrics", html, fixed = TRUE))
+  expect_true(grepl("export-download_complexity_metrics", html, fixed = TRUE))
+  expect_true(grepl("export-plot_format", html, fixed = TRUE))
+  expect_true(grepl("export-download_plots", html, fixed = TRUE))
+  expect_true(grepl("export-download_complexity_plots", html, fixed = TRUE))
+  expect_true(grepl("PDF", html, fixed = TRUE))
+  expect_true(grepl("JPEG", html, fixed = TRUE))
+  expect_true(grepl("type=\"radio\"", html, fixed = TRUE))
+  expect_false(grepl("type=\"checkbox\"", html, fixed = TRUE))
+  expect_false(grepl("download_standardized", html, fixed = TRUE))
+  expect_false(grepl("download_analysis\"", html, fixed = TRUE))
+  expect_false(grepl("download_qc", html, fixed = TRUE))
+  expect_false(grepl("download_settings", html, fixed = TRUE))
+  expect_false(grepl("Original standardized data", html, fixed = TRUE))
+  expect_false(grepl("QC summary", html, fixed = TRUE))
+})
+
 test_that("statistics module UI renders dashboard sections without tabsets", {
   html <- paste(as.character(stats_module_ui("stats")), collapse = "\n")
 

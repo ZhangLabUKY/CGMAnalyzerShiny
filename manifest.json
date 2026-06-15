@@ -5325,6 +5325,34 @@
         "Archs": "x64"
       }
     },
+    "zip": {
+      "Source": "CRAN",
+      "Repository": "https://cran.rstudio.com",
+      "description": {
+        "Package": "zip",
+        "Title": "Cross-Platform 'zip' Compression",
+        "Version": "2.3.3",
+        "Authors@R": "c(\n    person(\"Gábor\", \"Csárdi\", , \"csardi.gabor@gmail.com\", role = c(\"aut\", \"cre\")),\n    person(\"Kuba\", \"Podgórski\", role = \"ctb\"),\n    person(\"Rich\", \"Geldreich\", role = \"ctb\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"),\n           comment = c(ROR = \"03wc8by49\"))\n  )",
+        "Description": "Cross-Platform 'zip' Compression Library. A replacement for\n    the 'zip' function, that does not require any additional external\n    tools on any platform.",
+        "License": "MIT + file LICENSE",
+        "URL": "https://github.com/r-lib/zip, https://r-lib.github.io/zip/",
+        "BugReports": "https://github.com/r-lib/zip/issues",
+        "Suggests": "covr, pillar, processx, R6, testthat, withr",
+        "Config/Needs/website": "tidyverse/tidytemplate",
+        "Config/testthat/edition": "3",
+        "Config/usethis/last-upkeep": "2025-05-07",
+        "Encoding": "UTF-8",
+        "RoxygenNote": "7.3.2.9000",
+        "NeedsCompilation": "yes",
+        "Packaged": "2025-05-13 13:31:44 UTC; gaborcsardi",
+        "Author": "Gábor Csárdi [aut, cre],\n  Kuba Podgórski [ctb],\n  Rich Geldreich [ctb],\n  Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>)",
+        "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
+        "Repository": "CRAN",
+        "Date/Publication": "2025-05-13 14:10:02 UTC",
+        "Built": "R 4.5.0; x86_64-w64-mingw32; 2025-05-31 00:22:18 UTC; windows",
+        "Archs": "x64"
+      }
+    },
     "zoo": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -5356,7 +5384,7 @@
       "checksum": "d14f3e2b8b194dbf524efa7c190699e4"
     },
     ".github/workflows/test-coverage.yaml": {
-      "checksum": "e2de69bedb15f5e6abb6c9579be3a5d3"
+      "checksum": "631f1961de8803ea14af26b69a6ad595"
     },
     ".local-build-artifacts/CGManalyzer2.dll": {
       "checksum": "fbee8e9a421f59b589aa31955f7d1311"
@@ -5413,79 +5441,28 @@
       "checksum": "57544e4a6ad5ca1009e911ffd5bd337b"
     },
     "DESCRIPTION": {
-      "checksum": "fa18ab8b591e2bef33d6dbba2068fa8e"
+      "checksum": "4ce8c606e3f58e6b0e80eb7c1d415885"
     },
     "dev_notes/backlog.md": {
       "checksum": "9f445c198a57825fa7af2f9277dc32d8"
     },
     "dev_notes/decisions.md": {
-      "checksum": "bb2bd7fb1bffaec9f16efaadb738d0b2"
+      "checksum": "e5b7903c7c6f1a26243b80117837a557"
     },
-    "dev_notes/logs/performance-20260531.csv": {
-      "checksum": "bc1582797880161479cabd440423f5a5"
+    "dev_notes/logs/performance-20260614-221004.csv": {
+      "checksum": "16d87a7bc022837bd8f15b29681dd3fc"
     },
-    "dev_notes/logs/performance-20260601.csv": {
-      "checksum": "8a7fafd58d8979b5587e12c60ead2f48"
+    "dev_notes/logs/performance-20260614-224201.csv": {
+      "checksum": "b155c12b4dd91f20e61447a842b7a4c4"
     },
-    "dev_notes/logs/performance-20260610.csv": {
-      "checksum": "36b53d5810b3c5c4a8fdb40740c3148b"
-    },
-    "dev_notes/logs/performance-20260611.csv": {
-      "checksum": "38ba21bbcd30fdd297e5da99b356fa16"
-    },
-    "dev_notes/logs/performance-20260612.csv": {
-      "checksum": "7ede064b85873f14ed22079795e5af0f"
-    },
-    "dev_notes/logs/performance-20260613-191210.csv": {
-      "checksum": "a0cf3e270da3a12bd4218e6f00fc4f97"
-    },
-    "dev_notes/logs/performance-20260613-192616.csv": {
-      "checksum": "31c1c736fd0969b941ad57f14824320e"
-    },
-    "dev_notes/logs/performance-20260613-192915.csv": {
-      "checksum": "308d944e348f1e5a6c7052022809cae5"
-    },
-    "dev_notes/logs/performance-20260613-195520.csv": {
-      "checksum": "a9f5acaee15b5ded6cd6d0514b777d5f"
-    },
-    "dev_notes/logs/performance-20260613-195829.csv": {
-      "checksum": "63b8b20d928e53f83adddb8355addb7b"
-    },
-    "dev_notes/logs/performance-20260613-201442.csv": {
-      "checksum": "d8c5db1a8ee8571936a229f3f8d57bfb"
-    },
-    "dev_notes/logs/performance-20260613-201511.csv": {
-      "checksum": "d278dc98a0f376e6eef872347fb7942b"
-    },
-    "dev_notes/logs/performance-20260613-201636.csv": {
-      "checksum": "ba6694d1d91d8fbc5152ae9be256ddc2"
-    },
-    "dev_notes/logs/performance-20260613-202615.csv": {
-      "checksum": "d8eb9a961802a99fde854842712edc37"
-    },
-    "dev_notes/logs/performance-20260613-210740.csv": {
-      "checksum": "2411a7ef6fc043b847191efee6a6a00a"
-    },
-    "dev_notes/logs/performance-20260613-212633.csv": {
-      "checksum": "e12a24362731628997d26448bf463d44"
-    },
-    "dev_notes/logs/performance-20260613-214825.csv": {
-      "checksum": "3328813a10a73014a9e5228bb48095cd"
-    },
-    "dev_notes/logs/performance-20260613.csv": {
-      "checksum": "154b10ea9c2423b428db928b39436e45"
-    },
-    "dev_notes/logs/shiny-3838.err.log": {
-      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
-    },
-    "dev_notes/logs/shiny-3838.out.log": {
-      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    "dev_notes/logs/performance-20260614-231046.csv": {
+      "checksum": "ee384adbe3096fccaa36d5bd011fefe7"
     },
     "dev_notes/manual_qa.md": {
-      "checksum": "60b65149c51761652b00a5091bfe5ff4"
+      "checksum": "0f0adcba736fdbfd9b3c9a4798725f08"
     },
     "dev_notes/progress.md": {
-      "checksum": "a4f24cef91cce8f07edcb4cec26843d8"
+      "checksum": "1e6af849f1a1fbe1d22d1e4b85b278e7"
     },
     "dev_notes/README.md": {
       "checksum": "53318e0fe9ad9508dccf8087a727ce0d"
@@ -5524,7 +5501,7 @@
       "checksum": "e9918348e3f82ab88eb44bc7f30732f5"
     },
     "R/app_server.R": {
-      "checksum": "d4df7a0cc10573b20176cb68dc870ce6"
+      "checksum": "0413184760f12a763131ba4a05dcd81d"
     },
     "R/app_ui.R": {
       "checksum": "3dd2852deba1f26a8897e44c91ca0fe7"
@@ -5569,25 +5546,25 @@
       "checksum": "29b6f574c784d137d25ddf7817ebb9a0"
     },
     "R/module_complexity.R": {
-      "checksum": "ca222f37264c4341e471f6b4b51d70d0"
+      "checksum": "d1955a1156566bf55a67728fc9a11b20"
     },
     "R/module_export.R": {
-      "checksum": "0b0f0dd13e67479a054dae2300d4bc84"
+      "checksum": "b436e135287c43881cbfb26c6ba18c9c"
     },
     "R/module_metrics.R": {
-      "checksum": "82b50c990289a8ddbcea467b0c3d7cd6"
+      "checksum": "7321a1af1c328909019c79344cf2ed5d"
     },
     "R/module_plots.R": {
-      "checksum": "ad5256578622db16bc6cff162139401a"
+      "checksum": "2c60457ff1dff865c5afa04f5ca2b250"
     },
     "R/module_preprocessing.R": {
-      "checksum": "4863b2d46b283afd036d8e601bb620f1"
+      "checksum": "4f9b969bb98c436d921be6d7c49e1e09"
     },
     "R/module_qc.R": {
-      "checksum": "7d96f2ece2ca5347915001bcd70ed734"
+      "checksum": "08a21d75a2947a422566d1e2d5db1989"
     },
     "R/module_stats.R": {
-      "checksum": "1de17650a27692b4ef526324ccc94e65"
+      "checksum": "9ac08b3da10eebde3b0d4edefb0b720e"
     },
     "R/module_upload.R": {
       "checksum": "448aa495367d8abb3035e93857da374e"
@@ -5603,6 +5580,9 @@
     },
     "R/plots.R": {
       "checksum": "41d5a6b7b1c9af274ce68fd73f9e67fe"
+    },
+    "R/progress_ui.R": {
+      "checksum": "f109b6447c4ea0d3827bbc79acaf2b60"
     },
     "R/qc.R": {
       "checksum": "524dfe97a427fdac24173ab826369044"
@@ -5637,20 +5617,11 @@
     "README.Rmd": {
       "checksum": "064e0eb2623d11af07a63b9d69207859"
     },
-    "src/CGManalyzer2.dll": {
-      "checksum": "4a8e3e38df9bb928dd4a60fea218344f"
-    },
     "src/lttb.cpp": {
       "checksum": "a089bd53301e7f9dbc362cf380e07bf6"
     },
-    "src/lttb.o": {
-      "checksum": "b21c275fd886b5d0350a9c499ae7fe59"
-    },
     "src/RcppExports.cpp": {
       "checksum": "f229c2057d9f7762101fb3c1bd331f48"
-    },
-    "src/RcppExports.o": {
-      "checksum": "4b76bdb158a3ff79851d47b9a0e8a2b6"
     },
     "tests/testthat.R": {
       "checksum": "6b2cd1aa04daec5165b4f6014c23f923"
@@ -5694,6 +5665,27 @@
     "tests/testthat/dev_notes/logs/performance-20260613.csv": {
       "checksum": "a6b12866aa798b094dbcb3b1edbb0db7"
     },
+    "tests/testthat/dev_notes/logs/performance-20260614-220748.csv": {
+      "checksum": "2552c024adc7ad8c94a2b338147098f2"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260614-222928.csv": {
+      "checksum": "5ad9a947ba1c704057d6389e681a7dc5"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260614-222943.csv": {
+      "checksum": "014ea20ef28653f9832e5c25d9ae7e9f"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260614-223003.csv": {
+      "checksum": "c1bb7eac036f9fbc50d499ddc5731bdd"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260614-223027.csv": {
+      "checksum": "e49966a6d24ae96ce4c74da7d56372c3"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260614-230024.csv": {
+      "checksum": "14cca60287cfe4430bea77bf03a565e9"
+    },
+    "tests/testthat/dev_notes/logs/performance-20260614-230558.csv": {
+      "checksum": "8dcad1034e8ab296c9603841df3bab4a"
+    },
     "tests/testthat/helper-example-data.R": {
       "checksum": "ac7a680bc4fe45f6b2d3e2eb8c4ae796"
     },
@@ -5713,7 +5705,7 @@
       "checksum": "35d7ab1481eb47f74e190b18b0f807df"
     },
     "tests/testthat/test-export.R": {
-      "checksum": "e83b6c8173bbae5f0e269a51d2c5570d"
+      "checksum": "831785c5368a40c1aff45bb3793dbf48"
     },
     "tests/testthat/test-filter-choices.R": {
       "checksum": "cc68b2d9560fe0f16b8525cf45887048"
@@ -5742,6 +5734,9 @@
     "tests/testthat/test-plots.R": {
       "checksum": "9f2939e91a34a9342aad788593c8d3c0"
     },
+    "tests/testthat/test-progress-ui.R": {
+      "checksum": "184cd5589aac477320718ac81e91e06a"
+    },
     "tests/testthat/test-qc.R": {
       "checksum": "76b21420a8b94202111c87b62a69ce20"
     },
@@ -5758,7 +5753,7 @@
       "checksum": "38619723e8b8ab15564f91f8f4aef2c6"
     },
     "tests/testthat/test-tab-polish.R": {
-      "checksum": "2b33e059f72ecb7731bb5ebbe092a50a"
+      "checksum": "63ecbfb596ebe3f6564b47c632695146"
     },
     "tests/testthat/test-time-windows.R": {
       "checksum": "8be293bca42fb38fcf86f161eefcdf6a"

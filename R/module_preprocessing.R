@@ -233,8 +233,8 @@ preprocessing_module_server <- function(id, mapping, standardized, shared_missin
         error = function(error) NULL
       )
       interval_minutes <- input$imputation_interval_minutes %||% 5L
-      summary <- shiny::withProgress(
-        message = "Reviewing timestamp gaps...",
+      summary <- cgm_with_progress(
+        "Reviewing timestamp gaps...",
         value = 0.4,
         cgm_timed(
           "data_imputation_candidate_summary_fast",
