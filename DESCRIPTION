@@ -21,6 +21,7 @@ Imports:
     data.table,
     CGMissingDataR (>= 0.0.2),
     DT,
+    fda,
     future,
     fasttime,
     ggplot2,
@@ -28,6 +29,8 @@ Imports:
     lubridate,
     plotly,
     pracma,
+    pROC,
+    ranger,
     Rcpp,
     readr,
     readxl,
@@ -42,6 +45,7 @@ LinkingTo:
     Rcpp
 Suggests:
     CGManalyzer,
+    fdapace,
     iglu,
     promises,
     testthat (>= 3.0.0),

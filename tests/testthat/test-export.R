@@ -124,6 +124,28 @@ export_complexity_test_data <- function(points_per_subject = 36) {
   )
 }
 
+export_predictive_test_data <- function(ids = c("A", "B"), days = 3L, interval_minutes = 5L) {
+  rows <- list()
+  for (id in ids) {
+    for (day in seq_len(days)) {
+      timestamp <- as.POSIXct("2026-06-01 00:00:00", tz = "UTC") +
+        (day - 1L) * 86400 +
+        seq(0, by = interval_minutes * 60, length.out = 1440 / interval_minutes)
+      phase <- switch(id, A = 0, B = pi / 5, C = pi / 3, 0)
+      offset <- switch(id, A = 0, B = 18, C = -12, 0)
+      glucose <- 130 + offset + 65 * sin(seq_along(timestamp) / length(timestamp) * 4 * pi + phase)
+      rows[[length(rows) + 1L]] <- data.frame(
+        id = id,
+        timestamp = timestamp,
+        glucose = glucose,
+        imputed_flag = FALSE,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  do.call(rbind, rows)
+}
+
 test_that("complete complexity export computes all Subject IDs with full-dataset basis", {
   data <- export_complexity_test_data()
   params <- complexity_default_parameters(min_points = 20, mse_scale_max = 2)
@@ -251,4 +273,59 @@ test_that("complexity plot bundle writes PDF and single image-format downloads",
   expect_true(any(grepl("subject-subject-b_complexity-scale-curves.png", zip_listing$Name, fixed = TRUE)))
   expect_false(any(grepl("full-day", zip_listing$Name, fixed = TRUE)))
   expect_false(any(grepl("all-subjects", zip_listing$Name, fixed = TRUE)))
+})
+
+test_that("predictive plot manifest includes Subject IDs, settings, and plot types", {
+  data <- export_predictive_test_data(ids = c("Subject A", "Subject B"), days = 2L)
+  params <- predictive_default_parameters(target = "high", model = "glm", horizon_minutes = 30)
+
+  manifest <- export_predictive_plot_manifest(data, format = "png", parameters = params)
+
+  expect_equal(nrow(manifest), 4L)
+  expect_true(all(manifest$format == "png"))
+  expect_true(any(grepl("predictive-risk_above-range_30-min_glm.png", manifest$filename, fixed = TRUE)))
+  expect_true(any(grepl("predictive-feature-importance_above-range_30-min_glm.png", manifest$filename, fixed = TRUE)))
+  expect_true(all(grepl("subject-subject-", manifest$filename, fixed = TRUE)))
+  expect_false(any(grepl("all-subjects", manifest$filename, fixed = TRUE)))
+})
+
+test_that("predictive plot bundle writes PDF and single image-format downloads", {
+  data <- export_predictive_test_data(ids = c("A", "B"), days = 3L)
+  params <- predictive_default_parameters(target = "high", model = "glm", min_examples = 40, min_events = 3)
+  pdf_file <- tempfile(fileext = ".pdf")
+  zip_file <- tempfile(fileext = ".zip")
+
+  write_export_predictive_plot_bundle(data, pdf_file, format = "pdf", parameters = params, thresholds = default_cgm_thresholds())
+  write_export_predictive_plot_bundle(data, zip_file, format = "png", parameters = params, thresholds = default_cgm_thresholds())
+
+  expect_true(file.exists(pdf_file))
+  expect_gt(file.info(pdf_file)$size, 0)
+  zip_listing <- utils::unzip(zip_file, list = TRUE)
+  expect_true(any(grepl("subject-a_predictive-risk_above-range_30-min_glm.png", zip_listing$Name, fixed = TRUE)))
+  expect_true(any(grepl("subject-b_predictive-feature-importance_above-range_30-min_glm.png", zip_listing$Name, fixed = TRUE)))
+  expect_false(any(grepl("all-subjects", zip_listing$Name, fixed = TRUE)))
+})
+
+test_that("predictive export plots include legends and status pages", {
+  data <- export_predictive_test_data(ids = c("A"), days = 3L)
+  ready <- compute_complete_predictive_risk_bundle(
+    data,
+    predictive_default_parameters(target = "high", model = "glm", min_examples = 40, min_events = 3),
+    default_cgm_thresholds()
+  )
+  risk_plot <- export_predictive_plot_for_subject(ready, "A", "predictive_risk")
+
+  expect_equal(risk_plot$theme$legend.position, "bottom")
+  expect_silent(ggplot2::ggplot_build(risk_plot))
+
+  flat <- data
+  flat$glucose <- 120
+  not_ready <- compute_complete_predictive_risk_bundle(
+    flat,
+    predictive_default_parameters(target = "high", model = "glm", min_examples = 40, min_events = 3),
+    default_cgm_thresholds()
+  )
+  status_plot <- export_predictive_plot_for_subject(not_ready, "A", "predictive_risk")
+  expect_s3_class(status_plot, "ggplot")
+  expect_silent(ggplot2::ggplot_build(status_plot))
 })

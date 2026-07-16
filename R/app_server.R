@@ -546,5 +546,7 @@ app_server <- function(input, output, session) {
   plots_module_server("plots", analysis_data, metrics, settings, active_tab)
   stats_module_server("stats", metrics, active_tab)
   complexity_module_server("complexity", analysis_data, active_tab)
+  functional_profiles_module_server("functional_profiles", analysis_data, settings, active_tab)
+  predictive_risk_module_server("predictive_risk", analysis_data, settings, active_tab)
   export_module_server("export", analysis_data, settings, imputation_status)
 }

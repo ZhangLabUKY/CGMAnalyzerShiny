@@ -46,6 +46,16 @@ app_ui <- function() {
       complexity_module_ui("complexity")
     ),
     shiny::tabPanel(
+      "Glycemic Patterns",
+      value = "functional_profiles",
+      functional_profiles_module_ui("functional_profiles")
+    ),
+    shiny::tabPanel(
+      "Predictive Risk",
+      value = "predictive_risk",
+      predictive_risk_module_ui("predictive_risk")
+    ),
+    shiny::tabPanel(
       "Plots",
       value = "plots",
       plots_module_ui("plots")

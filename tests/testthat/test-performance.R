@@ -1,7 +1,10 @@
 test_that("data signatures change when important data features change", {
   data <- data.frame(
     id = c("A", "A"),
-    timestamp = parse_cgm_timestamp(c("2026-05-05 08:00:00", "2026-05-05 08:05:00")),
+    timestamp = parse_cgm_timestamp(c(
+      "2026-05-05 08:00:00",
+      "2026-05-05 08:05:00"
+    )),
     glucose = c(100, 110),
     source_file = "A.csv",
     imputed_flag = FALSE,
@@ -11,7 +14,13 @@ test_that("data signatures change when important data features change", {
   changed$glucose[[2L]] <- 120
 
   expect_false(identical(cgm_data_signature(data), cgm_data_signature(changed)))
-  expect_false(identical(threshold_signature(default_cgm_thresholds()), threshold_signature(modifyList(default_cgm_thresholds(), list(tir_upper = 190)))))
+  expect_false(identical(
+    threshold_signature(default_cgm_thresholds()),
+    threshold_signature(utils::modifyList(
+      default_cgm_thresholds(),
+      list(tir_upper = 190)
+    ))
+  ))
 })
 
 test_that("compact cache keys are deterministic for nested signatures", {
@@ -33,11 +42,14 @@ test_that("performance timing is disabled by default and can write logs when ena
   old_enabled <- getOption("CGMA.performance_log")
   old_file <- getOption("CGMA.performance_log_file")
   old_run_id <- getOption("CGMA.performance_run_id")
-  on.exit({
-    options(CGMA.performance_log = old_enabled)
-    options(CGMA.performance_log_file = old_file)
-    options(CGMA.performance_run_id = old_run_id)
-  }, add = TRUE)
+  on.exit(
+    {
+      options(CGMA.performance_log = old_enabled)
+      options(CGMA.performance_log_file = old_file)
+      options(CGMA.performance_run_id = old_run_id)
+    },
+    add = TRUE
+  )
 
   options(CGMA.performance_log = FALSE, CGMA.performance_log_file = FALSE)
   expect_false(cgm_performance_log_enabled())
@@ -52,7 +64,10 @@ test_that("performance timing is disabled by default and can write logs when ena
   )
   expect_equal(nrow(value), 3)
   log <- utils::read.csv(file, stringsAsFactors = FALSE)
-  expect_true(all(c("run_id", "start_time", "end_time", "timestamp", "elapsed_seconds") %in% names(log)))
+  expect_true(all(
+    c("run_id", "start_time", "end_time", "timestamp", "elapsed_seconds") %in%
+      names(log)
+  ))
   expect_equal(log$label, "enabled_test")
   expect_equal(log$rows, 3L)
   expect_equal(log$status, "ok")
@@ -67,12 +82,20 @@ test_that("performance timing is disabled by default and can write logs when ena
   expect_equal(error_row$status, "error")
   expect_true(grepl("error_message=boom", error_row$context, fixed = TRUE))
 
-  options(CGMA.performance_run_id = "20260613-010203", CGMA.performance_log_file = TRUE)
-  expect_true(grepl("performance-20260613-010203\\.csv$", cgm_performance_log_file()))
+  options(
+    CGMA.performance_run_id = "20260613-010203",
+    CGMA.performance_log_file = TRUE
+  )
+  expect_true(grepl(
+    "performance-20260613-010203\\.csv$",
+    cgm_performance_log_file()
+  ))
 })
 
 test_that("non-CGMA diagnostic messages can be suppressed without hiding performance logs", {
-  expect_silent(cgm_suppress_non_cgma_messages(message("external gap diagnostic")))
+  expect_silent(cgm_suppress_non_cgma_messages(message(
+    "external gap diagnostic"
+  )))
   expect_message(
     cgm_suppress_non_cgma_messages(message("[CGMA perf] kept")),
     "\\[CGMA perf\\] kept"
@@ -83,11 +106,14 @@ test_that("background workers reuse an existing matching plan", {
   old_generation <- background_worker_state$generation
   old_configured <- background_worker_state$configured
   old_workers <- background_worker_state$workers
-  on.exit({
-    background_worker_state$generation <- old_generation
-    background_worker_state$configured <- old_configured
-    background_worker_state$workers <- old_workers
-  }, add = TRUE)
+  on.exit(
+    {
+      background_worker_state$generation <- old_generation
+      background_worker_state$configured <- old_configured
+      background_worker_state$workers <- old_workers
+    },
+    add = TRUE
+  )
 
   background_worker_state$generation <- 0L
   background_worker_state$configured <- FALSE
@@ -119,8 +145,16 @@ test_that("data.table base metrics match legacy one-group summary", {
   )
   thresholds <- default_cgm_thresholds()
 
-  old <- summarize_one_metric_group(data, thresholds = thresholds, group_columns = c("id", "group"))
-  fast <- compute_base_metrics_dt(data, thresholds = thresholds, by = c("id", "group"))
+  old <- summarize_one_metric_group(
+    data,
+    thresholds = thresholds,
+    group_columns = c("id", "group")
+  )
+  fast <- compute_base_metrics_dt(
+    data,
+    thresholds = thresholds,
+    by = c("id", "group")
+  )
 
   expect_equal(fast[names(old)], old, tolerance = 1e-8)
 })
@@ -138,8 +172,18 @@ test_that("data.table QC summary matches legacy one-id summary", {
     stringsAsFactors = FALSE
   )
 
-  old <- summarize_one_id_qc(data, valid_day_hours = 1, glucose_min = 40, glucose_max = 400)
-  fast <- summarize_qc_dt(data, valid_day_hours = 1, glucose_min = 40, glucose_max = 400)
+  old <- summarize_one_id_qc(
+    data,
+    valid_day_hours = 1,
+    glucose_min = 40,
+    glucose_max = 400
+  )
+  fast <- summarize_qc_dt(
+    data,
+    valid_day_hours = 1,
+    glucose_min = 40,
+    glucose_max = 400
+  )
 
   expect_equal(fast, old, tolerance = 1e-8)
 })

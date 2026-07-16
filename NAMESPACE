@@ -3,4 +3,5 @@
 export(run_app)
 import(data.table)
 importFrom(Rcpp,evalCpp)
+importFrom(utils,modifyList)
 useDynLib(CGManalyzer2, .registration = TRUE)

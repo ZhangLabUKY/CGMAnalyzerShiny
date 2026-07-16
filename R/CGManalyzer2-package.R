@@ -5,6 +5,7 @@
 #' @keywords internal
 #' @import data.table
 #' @importFrom Rcpp evalCpp
+#' @importFrom utils modifyList
 #' @useDynLib CGManalyzer2, .registration = TRUE
 "_PACKAGE"
 
@@ -91,5 +92,27 @@ utils::globalVariables(c(
   "xmax",
   "xmin",
   "ymax",
-  "ymin"
+  "ymin",
+  "band_hover",
+  "fpca1",
+  "fpca2",
+  "hover",
+  "imputed_points",
+  "mean_glucose",
+  "mean_hover",
+  "mean_rate_mg_dl_per_hour",
+  "observed_points",
+  "phenotype_group",
+  "phenotype_hover",
+  "q25_glucose",
+  "q75_glucose",
+  "rate_hover",
+  "score_hover",
+  "smoothed_glucose",
+  "band",
+  "feature_label",
+  "risk_band",
+  "risk_probability",
+  "label",
+  "yintercept"
 ))
